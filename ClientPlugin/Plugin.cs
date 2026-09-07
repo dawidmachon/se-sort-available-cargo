@@ -6,11 +6,13 @@ using HarmonyLib;
 using Sandbox.Graphics.GUI;
 using VRage.Plugins;
 using VRageMath;
-using Sandbox.Game.Gui;
 using Sandbox.Game.Entities;
 using Sandbox.Game.Screens.Helpers;
+using Sandbox.Game.Gui;
 using System.Collections.Generic;
 using System;
+using VRage.Game.Entity;
+using VRage.Utils;
 
 // Define assembly version when compiled by Pulsar
 #if !DEV_BUILD
@@ -33,11 +35,29 @@ public class Plugin : IPlugin
     private static MyGuiControlLabel? s_sortBySpaceLeftLabel;
     private static MyGuiControlLabel? s_sortBySpaceRightLabel;
 
+    // Cached types resolved at runtime
+    private static Type? s_terminalInventoryControllerType;
+    private static Type? s_myInventoryType;
+
+    // Cached reflection data
+    private static PropertyInfo? s_inventoryMaxVolume;
+    private static PropertyInfo? s_inventoryCurrentVolume;
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     public void Init(object gameInstance)
     {
         Instance = this;
         Instance.settingsGenerator = new SettingsGenerator();
+
+        // Resolve internal types at runtime
+        s_terminalInventoryControllerType = AccessTools.TypeByName("Sandbox.Game.Gui.MyTerminalInventoryController");
+        s_myInventoryType = AccessTools.TypeByName("Sandbox.Game.Game.Entities.MyInventory");
+
+        if (s_myInventoryType != null)
+        {
+            s_inventoryMaxVolume = AccessTools.Property(s_myInventoryType, "MaxVolume");
+            s_inventoryCurrentVolume = AccessTools.Property(s_myInventoryType, "CurrentVolume");
+        }
 
         var harmony = new Harmony(Name);
         harmony.PatchAll(Assembly.GetExecutingAssembly());
@@ -103,7 +123,7 @@ public class Plugin : IPlugin
             {
                 Position = new Vector2(-0.06f + num, -0.225f),
                 Name = "SortBySpaceLeftLabel",
-                OriginAlign = MyGuiDrawAlignEnum.HORIZONTAL_RIGHT_AND_VERTICAL_CENTER,
+                OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
                 Text = "Sort"
             };
 
@@ -112,7 +132,7 @@ public class Plugin : IPlugin
             {
                 Position = new Vector2(-0.0075f + num, -0.225f),
                 Name = "SortBySpaceLeft",
-                OriginAlign = MyGuiDrawAlignEnum.HORIZONTAL_RIGHT_AND_VERTICAL_CENTER,
+                OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
                 IsChecked = Config.Current.SortByAvailableSpace
             };
             s_sortBySpaceLeftCheckbox.IsCheckedChanged += OnLeftSortCheckboxChanged;
@@ -138,7 +158,7 @@ public class Plugin : IPlugin
             {
                 Position = new Vector2(0.41f + num, -0.225f),
                 Name = "SortBySpaceRightLabel",
-                OriginAlign = MyGuiDrawAlignEnum.HORIZONTAL_RIGHT_AND_VERTICAL_CENTER,
+                OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
                 Text = "Sort"
             };
 
@@ -147,7 +167,7 @@ public class Plugin : IPlugin
             {
                 Position = new Vector2(0.463f + num, -0.225f),
                 Name = "SortBySpaceRight",
-                OriginAlign = MyGuiDrawAlignEnum.HORIZONTAL_RIGHT_AND_VERTICAL_CENTER,
+                OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
                 IsChecked = Config.Current.SortByAvailableSpace
             };
             s_sortBySpaceRightCheckbox.IsCheckedChanged += OnRightSortCheckboxChanged;
@@ -161,28 +181,31 @@ public class Plugin : IPlugin
     /// Patches the inventory sorting. When sort by available space is enabled,
     /// we sort by remaining capacity (biggest first = most empty containers first).
     /// </summary>
-    [HarmonyPatch(typeof(MyTerminalInventoryController), "CreateInventoryControlsInList")]
+    [HarmonyPatch]
     public static class CreateInventoryControlsInList_Patch
     {
+        // Target method resolved at runtime
+        private static MethodInfo TargetMethod()
+        {
+            return AccessTools.Method(s_terminalInventoryControllerType, "CreateInventoryControlsInList");
+        }
+
         [HarmonyPrefix]
-        public static void Prefix(List<MyEntity> owners, MyGuiControlList listControl, MyInventoryOwnerTypeEnum? filterType, MyTerminalInventoryController __instance)
+        public static void Prefix(List<MyEntity> owners, object listControl)
         {
             // Store the current sort preference for the Compare method
             s_currentSortBySpace = Config.Current.SortByAvailableSpace;
-            s_currentController = __instance;
         }
 
         [HarmonyPostfix]
-        public static void Postfix(List<MyEntity> owners, MyGuiControlList listControl, MyInventoryOwnerTypeEnum? filterType, MyTerminalInventoryController __instance)
+        public static void Postfix()
         {
             // Reset after sorting
             s_currentSortBySpace = false;
-            s_currentController = null;
         }
         
         // Static fields to pass state to the comparison method
-        private static bool s_currentSortBySpace;
-        private static MyTerminalInventoryController? s_currentController;
+        internal static bool s_currentSortBySpace;
         
         // Public accessor for the comparison
         public static int CompareInventoryOwnersBySpace(MyGuiControlBase x, MyGuiControlBase y)
@@ -195,8 +218,8 @@ public class Plugin : IPlugin
             if (ownerY == null) return 1;
 
             // Get the private fields using reflection
-            var interactedOwner = GetField<MyEntity>("m_interactedAsOwner");
-            var userOwner = GetField<MyEntity>("m_userAsOwner");
+            var interactedOwner = GetInteractedOwner();
+            var userOwner = GetUserOwner();
 
             // Keep interacted/user owner at the top
             if (ownerX.InventoryOwner == interactedOwner || ownerX.InventoryOwner == userOwner)
@@ -224,12 +247,45 @@ public class Plugin : IPlugin
             return string.Compare(ownerX.InventoryOwner?.DisplayNameText, ownerY.InventoryOwner?.DisplayNameText);
         }
 
-        private static T? GetField<T>(string fieldName) where T : class
+        private static MyEntity? GetInteractedOwner()
         {
-            if (s_currentController == null) return null;
-            var field = typeof(MyTerminalInventoryController).GetField(fieldName, 
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            return field?.GetValue(s_currentController) as T;
+            if (s_terminalInventoryControllerType == null) return null;
+            
+            // Find the static instance field or get it from the current screen
+            var screenType = AccessTools.TypeByName("Sandbox.Game.Gui.MyGuiScreenTerminal");
+            if (screenType == null) return null;
+            
+            var instanceField = AccessTools.Field(screenType, "m_instance");
+            var instance = instanceField?.GetValue(null) as MyGuiScreenTerminal;
+            if (instance == null) return null;
+            
+            // Get the controller
+            var controllerField = AccessTools.Field(screenType, "m_controllerInventory");
+            var controller = controllerField?.GetValue(instance);
+            if (controller == null) return null;
+            
+            // Get m_interactedAsOwner
+            var interactedField = AccessTools.Field(s_terminalInventoryControllerType, "m_interactedAsOwner");
+            return interactedField?.GetValue(controller) as MyEntity;
+        }
+
+        private static MyEntity? GetUserOwner()
+        {
+            if (s_terminalInventoryControllerType == null) return null;
+            
+            var screenType = AccessTools.TypeByName("Sandbox.Game.Gui.MyGuiScreenTerminal");
+            if (screenType == null) return null;
+            
+            var instanceField = AccessTools.Field(screenType, "m_instance");
+            var instance = instanceField?.GetValue(null) as MyGuiScreenTerminal;
+            if (instance == null) return null;
+            
+            var controllerField = AccessTools.Field(screenType, "m_controllerInventory");
+            var controller = controllerField?.GetValue(instance);
+            if (controller == null) return null;
+            
+            var userField = AccessTools.Field(s_terminalInventoryControllerType, "m_userAsOwner");
+            return userField?.GetValue(controller) as MyEntity;
         }
 
         private static float GetTotalAvailableSpace(MyGuiControlInventoryOwner owner)
@@ -237,11 +293,22 @@ public class Plugin : IPlugin
             float totalAvailable = 0f;
             if (owner?.InventoryOwner != null && owner.InventoryOwner.HasInventory)
             {
-                foreach (var inv in owner.InventoryOwner.GetInventories())
+                // Use GetInventory method to get each inventory
+                var getInventoryMethod = AccessTools.Method(typeof(MyEntity), "GetInventory");
+                for (int i = 0; i < 10; i++) // Max 10 inventories
                 {
-                    if (inv != null)
+                    var inv = getInventoryMethod?.Invoke(owner.InventoryOwner, new object[] { i });
+                    if (inv == null) break;
+                    
+                    // Use reflection to get MaxVolume and CurrentVolume
+                    if (s_inventoryMaxVolume != null && s_inventoryCurrentVolume != null)
                     {
-                        totalAvailable += (float)(inv.MaxVolume - inv.CurrentVolume);
+                        var maxVol = s_inventoryMaxVolume.GetValue(inv);
+                        var curVol = s_inventoryCurrentVolume.GetValue(inv);
+                        if (maxVol != null && curVol != null)
+                        {
+                            totalAvailable += (float)maxVol - (float)curVol;
+                        }
                     }
                 }
             }
@@ -252,11 +319,16 @@ public class Plugin : IPlugin
     /// <summary>
     /// Patches the CompareGuiControlInventoryOwners to use our custom sort when enabled.
     /// </summary>
-    [HarmonyPatch(typeof(MyTerminalInventoryController), "CompareGuiControlInventoryOwners")]
+    [HarmonyPatch]
     public static class CompareGuiControlInventoryOwners_Patch
     {
+        private static MethodInfo TargetMethod()
+        {
+            return AccessTools.Method(s_terminalInventoryControllerType, "CompareGuiControlInventoryOwners");
+        }
+
         [HarmonyPrefix]
-        public static bool Prefix(MyGuiControlBase x, MyGuiControlBase y, MyTerminalInventoryController __instance, ref int __result)
+        public static bool Prefix(MyGuiControlBase x, MyGuiControlBase y, ref int __result)
         {
             // If sorting by space is disabled, use original logic
             if (!Config.Current.SortByAvailableSpace)
