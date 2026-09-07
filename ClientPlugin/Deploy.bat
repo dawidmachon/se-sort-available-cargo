@@ -55,4 +55,12 @@ if !ERRORLEVEL! NEQ 0 (
     exit /b 1
 )
 
+REM Also deploy the plugin descriptor from the repo root (<Base>.xml -> <Base>.dll.xml)
+for %%I in ("%NAME%") do set "BASENAME=%%~nI"
+set "DESC_SRC=%~dp0..\!BASENAME!.xml"
+if exist "!DESC_SRC!" (
+    echo Copying "!BASENAME!.xml" to "!PLUGIN_DIR!\!BASENAME!.dll.xml"
+    copy /y "!DESC_SRC!" "!PLUGIN_DIR!\!BASENAME!.dll.xml" >nul
+)
+
 exit /b 0
