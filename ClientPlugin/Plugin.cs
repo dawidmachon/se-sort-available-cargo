@@ -150,8 +150,7 @@ public class Plugin : IPlugin
     
     /// <summary>
     /// Triggers a refresh of the inventory list by calling SetRightFilter.
-    /// This causes CreateInventoryControlsInList to be called, which will use our
-    /// CompareInventoryOwners_Patch to sort by available space.
+    /// The CreateInventoryControlsInList_Patch will handle cache setup/cleanup.
     /// </summary>
     private static void RefreshInventoryList()
     {
@@ -165,11 +164,8 @@ public class Plugin : IPlugin
         var controller = s_controllerField.GetValue(instance);
         if (controller == null) return;
 
-        // Cache owner values BEFORE the sort happens
-        CacheOwnerValues();
-
         // Call SetRightFilter via reflection to trigger list rebuild
-        // This method is called when filter changes and it rebuilds the inventory list
+        // CreateInventoryControlsInList_Patch will handle cache setup/cleanup
         var setRightFilterMethod = AccessTools.Method(s_terminalInventoryControllerType, "SetRightFilter");
         var getRightFilterMethod = AccessTools.Property(s_terminalInventoryControllerType, "RightFilter");
 
@@ -178,9 +174,33 @@ public class Plugin : IPlugin
             var currentFilter = getRightFilterMethod.GetValue(controller);
             setRightFilterMethod.Invoke(controller, new[] { currentFilter });
         }
+    }
 
-        // Clear cache after sorting completes
-        ClearOwnerCache();
+    /// <summary>
+    /// Patches CreateInventoryControlsInList to set owner cache before sorting begins.
+    /// This ensures the cache is populated regardless of how the list is rebuilt.
+    /// </summary>
+    [HarmonyPatch]
+    public static class CreateInventoryControlsInList_Patch
+    {
+        private static MethodInfo TargetMethod()
+        {
+            return AccessTools.Method(s_terminalInventoryControllerType, "CreateInventoryControlsInList");
+        }
+
+        [HarmonyPrefix]
+        public static void Prefix()
+        {
+            // Cache owner values before sorting begins
+            CacheOwnerValues();
+        }
+
+        [HarmonyPostfix]
+        public static void Postfix()
+        {
+            // Clear cache after sorting completes
+            ClearOwnerCache();
+        }
     }
 
     /// <summary>
@@ -217,7 +237,7 @@ public class Plugin : IPlugin
                 return false;
             }
 
-            // Use cached owner values (set once per sort operation)
+            // Use cached owner values (set once per sort operation by CreateInventoryControlsInList_Patch)
             var interactedOwner = s_cachedInteractedOwner;
             var userOwner = s_cachedUserOwner;
 
