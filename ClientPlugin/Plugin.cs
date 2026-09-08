@@ -101,7 +101,9 @@ public class Plugin : IPlugin
             s_rightFilterProperty = AccessTools.Property(s_terminalInventoryControllerType, "RightFilter");
             s_searchBoxRightField = AccessTools.Field(s_terminalInventoryControllerType, "m_searchBoxRight");
             s_blockSearchRightTextChangedMethod = AccessTools.Method(s_terminalInventoryControllerType, "BlockSearchRight_TextChanged");
+#pragma warning disable CS0618 // MyInventoryOwnerTypeEnum is obsolete but required by the game's CreateInventoryControlsInList signature
             s_createInventoryControlsInListMethod = AccessTools.Method(s_terminalInventoryControllerType, "CreateInventoryControlsInList", new[] { typeof(List<MyEntity>), typeof(MyGuiControlList), typeof(MyInventoryOwnerTypeEnum?) });
+#pragma warning restore CS0618
         }
 
         var harmony = new Harmony(Name);
@@ -244,7 +246,9 @@ public class Plugin : IPlugin
             var owners = s_interactedGridOwnersField.GetValue(controller) as List<MyEntity>;
             var ownersMechanical = s_interactedGridOwnersMechanicalField?.GetValue(controller) as List<MyEntity>;
             var rightOwnersControl = s_rightOwnersControlField.GetValue(controller) as MyGuiControlList;
+#pragma warning disable CS0618 // MyInventoryOwnerTypeEnum is obsolete but required by the game's CreateInventoryControlsInList signature
             var filterType = s_rightFilterTypeField.GetValue(controller) as MyInventoryOwnerTypeEnum?;
+#pragma warning restore CS0618
             var filterTypeIndex = (int?)s_rightFilterTypeIndexProperty.GetValue(controller);
 
             if (owners == null || rightOwnersControl == null) return;

@@ -1,6 +1,6 @@
 # se-sort-available-cargo
 
-Status: PUBLISHED
+Status: LOCAL-ONLY (preparing first PluginHub release v1.0.0)
 Category: public
 
 Client plugin that adds a sort checkbox to the terminal inventory panel, allowing users to sort inventory containers by available cargo space (most empty/largest first).
