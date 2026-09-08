@@ -37,13 +37,13 @@ public class Plugin : IPlugin
     private static PropertyInfo? s_inventoryCurrentVolume;
     private static MethodInfo? s_getInventoryMethod;
     private static MethodInfo? s_setRightFilterMethod;
-    private static PropertyInfo? s_rightFilterProperty;
 
     // Cached field info for GetOwner lookups (avoid repeated AccessTools.Field calls)
     private static FieldInfo? s_instanceField;
     private static FieldInfo? s_controllerField;
     private static FieldInfo? s_interactedOwnerField;
     private static FieldInfo? s_userOwnerField;
+    private static FieldInfo? s_rightFilterTypeField;
 
     // Cached owner values for current sort operation (set in Prefix, cleared in Postfix)
     private static MyEntity? s_cachedInteractedOwner;
@@ -71,7 +71,6 @@ public class Plugin : IPlugin
         if (s_terminalInventoryControllerType != null)
         {
             s_setRightFilterMethod = AccessTools.Method(s_terminalInventoryControllerType, "SetRightFilter");
-            s_rightFilterProperty = AccessTools.Property(s_terminalInventoryControllerType, "RightFilter");
         }
 
         // Cache field info for GetOwner lookups
@@ -84,6 +83,7 @@ public class Plugin : IPlugin
         {
             s_interactedOwnerField = AccessTools.Field(s_terminalInventoryControllerType, "m_interactedAsOwner");
             s_userOwnerField = AccessTools.Field(s_terminalInventoryControllerType, "m_userAsOwner");
+            s_rightFilterTypeField = AccessTools.Field(s_terminalInventoryControllerType, "m_rightFilterType");
         }
 
         var harmony = new Harmony(Name);
@@ -173,7 +173,7 @@ public class Plugin : IPlugin
         try
         {
             if (s_instanceField == null || s_controllerField == null) return;
-            if (s_setRightFilterMethod == null || s_rightFilterProperty == null) return;
+            if (s_setRightFilterMethod == null || s_rightFilterTypeField == null) return;
 
             // Get the screen instance using cached FieldInfo
             var instance = s_instanceField.GetValue(null) as MyGuiScreenTerminal;
@@ -183,9 +183,9 @@ public class Plugin : IPlugin
             var controller = s_controllerField.GetValue(instance);
             if (controller == null) return;
 
-            // Call SetRightFilter via cached reflection to trigger list rebuild
-            // CreateInventoryControlsInList_Patch will handle cache setup/cleanup
-            var currentFilter = s_rightFilterProperty.GetValue(controller);
+            // Get the actual filter type (m_rightFilterType field), not the UI property (RightFilter)
+            // SetRightFilter expects MyInventoryOwnerTypeEnum? but RightFilter property returns MyGuiControlRadioButtonStyleEnum
+            var currentFilter = s_rightFilterTypeField.GetValue(controller);
             s_setRightFilterMethod.Invoke(controller, new[] { currentFilter });
         }
         catch (Exception ex)
