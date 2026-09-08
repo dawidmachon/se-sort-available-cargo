@@ -35,6 +35,7 @@ public class Plugin : IPlugin
     // Cached reflection data
     private static PropertyInfo? s_inventoryMaxVolume;
     private static PropertyInfo? s_inventoryCurrentVolume;
+    private static MethodInfo? s_getInventoryMethod;
 
     // Cached field info for GetOwner lookups (avoid repeated AccessTools.Field calls)
     private static FieldInfo? s_instanceField;
@@ -61,6 +62,7 @@ public class Plugin : IPlugin
         {
             s_inventoryMaxVolume = AccessTools.Property(myInventoryType, "MaxVolume");
             s_inventoryCurrentVolume = AccessTools.Property(myInventoryType, "CurrentVolume");
+            s_getInventoryMethod = AccessTools.Method(myInventoryType, "GetInventory");
         }
 
         // Cache field info for GetOwner lookups
@@ -271,7 +273,7 @@ public class Plugin : IPlugin
     }
 
     /// <summary>
-    /// Caches owner values before sorting begins. Called via reflection from OnSortCheckboxChanged.
+    /// Caches owner values before sorting begins. Called from CreateInventoryControlsInList_Patch.Prefix.
     /// </summary>
     private static void CacheOwnerValues()
     {
@@ -306,11 +308,12 @@ public class Plugin : IPlugin
         float totalAvailable = 0f;
         if (owner?.InventoryOwner != null && owner.InventoryOwner.HasInventory)
         {
-            // Use GetInventory method to get each inventory
-            var getInventoryMethod = AccessTools.Method(typeof(MyEntity), "GetInventory");
+            if (s_getInventoryMethod == null) return 0f;
+
+            // Use cached GetInventory method to get each inventory
             for (int i = 0; i < 10; i++) // Max 10 inventories
             {
-                var inv = getInventoryMethod?.Invoke(owner.InventoryOwner, new object[] { i });
+                var inv = s_getInventoryMethod.Invoke(owner.InventoryOwner, new object[] { i });
                 if (inv == null) break;
                 
                 // Use reflection to get MaxVolume and CurrentVolume
