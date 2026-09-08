@@ -4,6 +4,7 @@
     <RootNamespace>ClientPlugin</RootNamespace>
     <AssemblyName>InventorySort</AssemblyName>
     <LangVersion>14</LangVersion>
+    <Nullable>annotations</Nullable>
       
     <!-- Target platforms on Windows and Linux -->
     <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('Windows'))">net48;net10.0</TargetFrameworks>
@@ -52,6 +53,7 @@
     <OutputPath>bin/Debug/</OutputPath>
     <DefineConstants>DEBUG;TRACE;DEV_BUILD</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
+    <NoWarn>$(NoWarn);CS8632</NoWarn>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
 

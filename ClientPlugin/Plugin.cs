@@ -30,10 +30,10 @@ public class Plugin : IPlugin
     private SettingsGenerator settingsGenerator;
 
     // Static state for UI buttons (must be static to persist across refreshes)
-    private static MyGuiControlCheckbox? s_sortBySpaceLeftCheckbox;
-    private static MyGuiControlCheckbox? s_sortBySpaceRightCheckbox;
-    private static MyGuiControlLabel? s_sortBySpaceLeftLabel;
-    private static MyGuiControlLabel? s_sortBySpaceRightLabel;
+    private static MyGuiControlCheckbox s_sortBySpaceLeftCheckbox;
+    private static MyGuiControlCheckbox s_sortBySpaceRightCheckbox;
+    private static MyGuiControlLabel s_sortBySpaceLeftLabel;
+    private static MyGuiControlLabel s_sortBySpaceRightLabel;
 
     // Cached types resolved at runtime
     private static Type? s_terminalInventoryControllerType;
@@ -213,8 +213,7 @@ public class Plugin : IPlugin
             var ownerX = x as MyGuiControlInventoryOwner;
             var ownerY = y as MyGuiControlInventoryOwner;
 
-            if (ownerX == null && ownerY == null) return 0;
-            if (ownerX == null) return -1;
+            if (ownerX == null) return ownerY == null ? 0 : -1;
             if (ownerY == null) return 1;
 
             // Get the private fields using reflection
