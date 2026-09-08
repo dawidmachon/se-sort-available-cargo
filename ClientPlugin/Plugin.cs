@@ -123,25 +123,30 @@ public class Plugin : IPlugin
             if (page.Controls.GetControlByName("SortBySpaceRight") != null)
                 return;
 
-            // Find the Hide Empty checkbox by name
-            var hideEmptyCheckbox = page.Controls.GetControlByName("CheckboxHideEmptyRight") as MyGuiControlCheckbox;
+            // Find the RightFilterAllButton to position ourselves consistently
+            var filterButton = page.Controls.GetControlByName("RightFilterAllButton") as MyGuiControlRadioButton;
 
-            if (hideEmptyCheckbox != null)
+            if (filterButton != null)
             {
-                // Place Sort checkbox to the RIGHT of Hide Empty checkbox
-                // This avoids overlap with search bars added by other plugins
+                // Place Sort in the filter button row (y = -0.338f), to the right of filter buttons
+                // Filter buttons extend to about X = 0.55f, inventory list starts at X = 0.465f
+                // We place Sort label + checkbox at X = 0.56f to 0.60f (in the gap above inventory list)
+                // Use Y aligned with filter buttons (y = -0.338f)
+                float yPos = filterButton.Position.Y;
+
+                // Sort checkbox - place at X = 0.60f, same Y as filter buttons
                 var sortCheckbox = new MyGuiControlCheckbox
                 {
-                    Position = new Vector2(hideEmptyCheckbox.Position.X + 0.055f, hideEmptyCheckbox.Position.Y),
+                    Position = new Vector2(0.60f, yPos),
                     Name = "SortBySpaceRight",
                     OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER,
                     IsChecked = Config.Current.SortByAvailableSpace
                 };
 
-                // Place Sort label to the LEFT of Sort checkbox
+                // Sort label - to the left of checkbox
                 var sortLabel = new MyGuiControlLabel
                 {
-                    Position = new Vector2(sortCheckbox.Position.X - sortCheckbox.Size.X, sortCheckbox.Position.Y),
+                    Position = new Vector2(sortCheckbox.Position.X - 0.01f, yPos),
                     Name = "SortBySpaceRightLabel",
                     OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
                     Text = "Sort"
