@@ -11,6 +11,7 @@ using Sandbox.Game.Entities;
 using Sandbox.Game.Screens.Helpers;
 using Sandbox.Game.Gui;
 using System;
+using System.Collections.Generic;
 using VRage.Game.Entity;
 
 // Define assembly version when compiled by Pulsar
@@ -44,6 +45,10 @@ public class Plugin : IPlugin
     private static FieldInfo? s_interactedOwnerField;
     private static FieldInfo? s_userOwnerField;
     private static FieldInfo? s_rightFilterTypeField;
+    private static FieldInfo? s_rightOwnersControlField;
+    private static FieldInfo? s_interactedGridOwnersField;
+    private static PropertyInfo? s_rightFilterTypeIndexProperty;
+    private static MethodInfo? s_createInventoryControlsInListMethod;
 
     // Cached owner values for current sort operation (set in Prefix, cleared in Postfix)
     private static MyEntity? s_cachedInteractedOwner;
@@ -84,6 +89,10 @@ public class Plugin : IPlugin
             s_interactedOwnerField = AccessTools.Field(s_terminalInventoryControllerType, "m_interactedAsOwner");
             s_userOwnerField = AccessTools.Field(s_terminalInventoryControllerType, "m_userAsOwner");
             s_rightFilterTypeField = AccessTools.Field(s_terminalInventoryControllerType, "m_rightFilterType");
+            s_rightOwnersControlField = AccessTools.Field(s_terminalInventoryControllerType, "m_rightOwnersControl");
+            s_interactedGridOwnersField = AccessTools.Field(s_terminalInventoryControllerType, "m_interactedGridOwners");
+            s_rightFilterTypeIndexProperty = AccessTools.Property(s_terminalInventoryControllerType, "RightFilterTypeIndex");
+            s_createInventoryControlsInListMethod = AccessTools.Method(s_terminalInventoryControllerType, "CreateInventoryControlsInList", new[] { typeof(List<MyEntity>), typeof(MyGuiControlList), typeof(MyInventoryOwnerTypeEnum?) });
         }
 
         var harmony = new Harmony(Name);
@@ -151,7 +160,7 @@ public class Plugin : IPlugin
                 float yPos = hideEmptyCheckbox.Position.Y;
                 float sortX = searchBox.Position.X + searchBox.Size.X + 0.005f;
 
-                // Sort checkbox
+                // Sort checkbox - label removed to avoid overlap, checkbox alone is enough
                 var sortCheckbox = new MyGuiControlCheckbox
                 {
                     Position = new Vector2(sortX, yPos),
@@ -160,17 +169,7 @@ public class Plugin : IPlugin
                     IsChecked = Config.Current.SortByAvailableSpace
                 };
 
-                // Sort label - to the left of checkbox
-                var sortLabel = new MyGuiControlLabel
-                {
-                    Position = new Vector2(sortX - 0.04f, yPos),
-                    Name = "SortBySpaceRightLabel",
-                    OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
-                    Text = "Sort"
-                };
-
                 sortCheckbox.IsCheckedChanged += OnSortCheckboxChanged;
-                page.Controls.Add(sortLabel);
                 page.Controls.Add(sortCheckbox);
             }
         }
@@ -181,46 +180,60 @@ public class Plugin : IPlugin
         Config.Current.SortByAvailableSpace = checkbox.IsChecked;
         ConfigStorage.Save(Config.Current);
         
+        // Debug log
+        try { MyLog.Default?.WriteLine($"[InventorySort] Checkbox clicked, SortEnabled={checkbox.IsChecked}"); } catch {}
+        
         // Trigger a rebuild of the right inventory list to apply the new sort order
         RefreshInventoryList();
     }
     
     /// <summary>
-    /// Triggers a refresh of the inventory list by calling SetRightFilter.
+    /// Triggers a refresh of the inventory list by directly calling CreateInventoryControlsInList.
+    /// This bypasses SetRightFilter which has internal logic that might skip the rebuild.
     /// The CreateInventoryControlsInList_Patch will handle cache setup/cleanup.
     /// </summary>
     private static void RefreshInventoryList()
     {
         try
         {
+            // Check all required cached members
             if (s_instanceField == null || s_controllerField == null) return;
-            if (s_setRightFilterMethod == null || s_rightFilterTypeField == null) return;
+            if (s_rightOwnersControlField == null || s_interactedGridOwnersField == null) return;
+            if (s_rightFilterTypeIndexProperty == null || s_rightFilterTypeField == null) return;
+            if (s_createInventoryControlsInListMethod == null) return;
 
-            // Get the screen instance using cached FieldInfo
+            // Get the screen instance
             var instance = s_instanceField.GetValue(null) as MyGuiScreenTerminal;
             if (instance == null) return;
 
-            // Get the controller using cached FieldInfo
+            // Get the controller
             var controller = s_controllerField.GetValue(instance);
             if (controller == null) return;
 
-            // Get the actual filter type (m_rightFilterType field), not the UI property (RightFilter)
-            // SetRightFilter expects MyInventoryOwnerTypeEnum? but RightFilter property returns MyGuiControlRadioButtonStyleEnum
-            var currentFilter = s_rightFilterTypeField.GetValue(controller);
-            s_setRightFilterMethod.Invoke(controller, new[] { currentFilter });
+            // Get the owners list and filter type
+            var owners = s_interactedGridOwnersField.GetValue(controller) as List<MyEntity>;
+            var rightOwnersControl = s_rightOwnersControlField.GetValue(controller) as MyGuiControlList;
+            var filterType = s_rightFilterTypeField.GetValue(controller) as MyInventoryOwnerTypeEnum?;
+            var filterTypeIndex = (int?)s_rightFilterTypeIndexProperty.GetValue(controller);
+
+            if (owners == null || rightOwnersControl == null) return;
+
+            // Use same logic as SetRightFilter: if filterTypeIndex == 2, use mechanical owners
+            var ownersToUse = (filterTypeIndex == 2) ? owners : owners;
+
+            // Cache owner values before rebuilding the list
+            CacheOwnerValues();
+
+            // Directly call CreateInventoryControlsInList
+            s_createInventoryControlsInListMethod.Invoke(controller, new object[] { ownersToUse, rightOwnersControl, filterType });
+
+            // Clear cache after list is built
+            ClearOwnerCache();
         }
         catch (Exception ex)
         {
-            // Log but don't crash - the plugin should be resilient
-            // MyLog.Default may be null early in startup, so check before logging
-            try
-            {
-                MyLog.Default?.WriteLine($"[InventorySort] RefreshInventoryList failed: {ex.Message}");
-            }
-            catch
-            {
-                // Ignore logging failures
-            }
+            // Log but don't crash
+            try { MyLog.Default?.WriteLine($"[InventorySort] RefreshInventoryList failed: {ex}"); } catch {}
         }
     }
 
@@ -239,6 +252,8 @@ public class Plugin : IPlugin
         [HarmonyPrefix]
         public static void Prefix()
         {
+            // Debug log
+            try { MyLog.Default?.WriteLine("[InventorySort] CreateInventoryControlsInList Prefix"); } catch {}
             // Cache owner values before sorting begins
             CacheOwnerValues();
         }
@@ -246,6 +261,8 @@ public class Plugin : IPlugin
         [HarmonyPostfix]
         public static void Postfix()
         {
+            // Debug log
+            try { MyLog.Default?.WriteLine("[InventorySort] CreateInventoryControlsInList Postfix"); } catch {}
             // Clear cache after sorting completes
             ClearOwnerCache();
         }
@@ -379,7 +396,11 @@ public class Plugin : IPlugin
                     var curVol = s_inventoryCurrentVolume.GetValue(inv);
                     if (maxVol != null && curVol != null)
                     {
-                        totalAvailable += (float)maxVol - (float)curVol;
+                        float maxFloat = (float)maxVol;
+                        float curFloat = (float)curVol;
+                        totalAvailable += maxFloat - curFloat;
+                        // Debug log for volume values
+                        try { MyLog.Default?.WriteLine($"[InventorySort] {owner.InventoryOwner.DisplayNameText} inv{i}: max={maxFloat:F4} cur={curFloat:F4} avail={maxFloat - curFloat:F4}"); } catch {}
                     }
                 }
             }
