@@ -123,29 +123,30 @@ public class Plugin : IPlugin
             if (page.Controls.GetControlByName("SortBySpaceRight") != null)
                 return;
 
-            // Find the Hide Empty label and checkbox by name
-            var hideEmptyLabel = page.Controls.GetControlByName("LabelHideEmptyRight") as MyGuiControlLabel;
+            // Find the Hide Empty checkbox by name
             var hideEmptyCheckbox = page.Controls.GetControlByName("CheckboxHideEmptyRight") as MyGuiControlCheckbox;
 
-            if (hideEmptyLabel != null)
+            if (hideEmptyCheckbox != null)
             {
-                // Place Sort label to the left of Hide Empty label
+                // Place Sort checkbox to the RIGHT of Hide Empty checkbox
+                // This avoids overlap with search bars added by other plugins
+                var sortCheckbox = new MyGuiControlCheckbox
+                {
+                    Position = new Vector2(hideEmptyCheckbox.Position.X + 0.055f, hideEmptyCheckbox.Position.Y),
+                    Name = "SortBySpaceRight",
+                    OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER,
+                    IsChecked = Config.Current.SortByAvailableSpace
+                };
+
+                // Place Sort label to the LEFT of Sort checkbox
                 var sortLabel = new MyGuiControlLabel
                 {
-                    Position = new Vector2(hideEmptyLabel.Position.X - 0.048f, hideEmptyLabel.Position.Y),
+                    Position = new Vector2(sortCheckbox.Position.X - sortCheckbox.Size.X, sortCheckbox.Position.Y),
                     Name = "SortBySpaceRightLabel",
                     OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
                     Text = "Sort"
                 };
 
-                // Place Sort checkbox to the left of Sort label
-                var sortCheckbox = new MyGuiControlCheckbox
-                {
-                    Position = new Vector2(sortLabel.Position.X - 0.048f, hideEmptyCheckbox?.Position.Y ?? hideEmptyLabel.Position.Y),
-                    Name = "SortBySpaceRight",
-                    OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
-                    IsChecked = Config.Current.SortByAvailableSpace
-                };
                 sortCheckbox.IsCheckedChanged += OnSortCheckboxChanged;
 
                 page.Controls.Add(sortLabel);
@@ -169,21 +170,29 @@ public class Plugin : IPlugin
     /// </summary>
     private static void RefreshInventoryList()
     {
-        if (s_instanceField == null || s_controllerField == null) return;
-        if (s_setRightFilterMethod == null || s_rightFilterProperty == null) return;
+        try
+        {
+            if (s_instanceField == null || s_controllerField == null) return;
+            if (s_setRightFilterMethod == null || s_rightFilterProperty == null) return;
 
-        // Get the screen instance using cached FieldInfo
-        var instance = s_instanceField.GetValue(null) as MyGuiScreenTerminal;
-        if (instance == null) return;
+            // Get the screen instance using cached FieldInfo
+            var instance = s_instanceField.GetValue(null) as MyGuiScreenTerminal;
+            if (instance == null) return;
 
-        // Get the controller using cached FieldInfo
-        var controller = s_controllerField.GetValue(instance);
-        if (controller == null) return;
+            // Get the controller using cached FieldInfo
+            var controller = s_controllerField.GetValue(instance);
+            if (controller == null) return;
 
-        // Call SetRightFilter via cached reflection to trigger list rebuild
-        // CreateInventoryControlsInList_Patch will handle cache setup/cleanup
-        var currentFilter = s_rightFilterProperty.GetValue(controller);
-        s_setRightFilterMethod.Invoke(controller, new[] { currentFilter });
+            // Call SetRightFilter via cached reflection to trigger list rebuild
+            // CreateInventoryControlsInList_Patch will handle cache setup/cleanup
+            var currentFilter = s_rightFilterProperty.GetValue(controller);
+            s_setRightFilterMethod.Invoke(controller, new[] { currentFilter });
+        }
+        catch (Exception ex)
+        {
+            // Log but don't crash - the plugin should be resilient
+            MyLog.Default.WriteLine($"[InventorySort] RefreshInventoryList failed: {ex.Message}");
+        }
     }
 
     /// <summary>
