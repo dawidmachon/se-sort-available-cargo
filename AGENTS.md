@@ -1,36 +1,65 @@
-# se-inventory-sort
+# se-sort-available-cargo
 
-Client plugin that adds a sort button to the inventory UI, allowing users to sort inventory containers by available space (biggest/emptiest first).
+Status: LOCAL-ONLY (preparing first PluginHub release v1.0.0)
+Category: public
+
+Client plugin that adds a sort checkbox to the terminal inventory panel, allowing users to sort inventory containers by available cargo space (most empty/largest first).
 
 ## Features
 
-- Adds a "Sort" checkbox to both left and right inventory panels in the terminal
-- By default, inventories are sorted by available space (most empty, largest first)
-- User preference persists between sessions
-- Can be toggled on/off via the checkbox or settings dialog
+- **Sort Checkbox**: Adds toggle to right inventory panel (next to "Hide Empty")
+- **Cargo-Space Sorting**: Sorts by available capacity (most empty first)
+- **Persistent Settings**: Preference saved between sessions
+- **Clean Integration**: Only visible on grid inventories (not character)
+- **Right Panel Only**: Left panel (production) keeps alphabetical order by default
 
 ## Key Files
 
-- `ClientPlugin/Plugin.cs` - Main plugin entry point with Harmony patches
-- `ClientPlugin/Config.cs` - Configuration settings
+- `ClientPlugin/Plugin.cs` - Main plugin with Harmony patches
+- `ClientPlugin/Config.cs` - Configuration with property change notification
 - `ClientPlugin/Settings/` - Settings dialog infrastructure
+- `README.md` - User documentation
+- `SortAvailableCargo.xml` - Pulsar plugin descriptor
 
 ## Harmony Patches
 
-- `MyGuiScreenTerminal.CreateInventoryPageLeftSection` - Adds sort checkbox to left panel
-- `MyGuiScreenTerminal.CreateInventoryPageRightSection` - Adds sort checkbox to right panel
-- `MyTerminalInventoryController.CompareGuiControlInventoryOwners` - Custom sort logic
+| Method | Purpose |
+|--------|---------|
+| `CreateInventoryPageRightSection` | Adds Sort checkbox UI |
+| `CreateInventoryControlsInList` | Sets owner cache before sorting |
+| `CompareGuiControlInventoryOwners` | Custom sort by available cargo space |
+| `RightTypeGroup_SelectedChanged` | Updates checkbox visibility |
+
+## Performance Considerations
+
+- **Reflection caching**: All type/method/field lookups cached at Init
+- **Owner cache**: Set once per list build, not per comparison
+- **Space cache**: Dictionary keyed by MyEntity, cleared between sorts — each owner's space is computed at most once per sort
+- **Sort threshold**: ~0.0001f float comparison tolerance to avoid jitter
+- **O(N log N)**: Standard sort complexity, ~300 comparisons for 50 items
+
+## Config Options
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| SortByAvailableSpace | true | Enable space-based sorting |
+| SortLeftPanelToo | false | Also sort left (production) panel |
+| KeepActiveContainerFirst | false | ON = vanilla: pin active/opened container to the top. OFF (default) = all containers sorted purely by space. Only effective when SortByAvailableSpace is on. |
+
+Config file: `%AppData%\Roaming\SpaceEngineers\Storage\SortAvailableCargo.cfg`
 
 ## Game Code References
 
-- `Sandbox.Game.GUI.MyGuiScreenTerminal` - Terminal screen with inventory tab
-- `Sandbox.Game.GUI.MyTerminalInventoryController` - Inventory controller with sorting logic
-- `Sandbox.Game.Screens.Helpers.MyGuiControlInventoryOwner` - Individual inventory container control
+- `Sandbox.Game.Gui.MyGuiScreenTerminal.CreateInventoryPageRightSection` - UI creation
+- `Sandbox.Game.Gui.MyTerminalInventoryController.CreateInventoryControlsInList` - List building
+- `Sandbox.Game.Gui.MyTerminalInventoryController.CompareGuiControlInventoryOwners` - Sort comparison
+- `VRage.Game.Entity.MyEntity.GetInventoryBase(int)` - Inventory access
+- `Sandbox.Game.MyInventory.MaxVolume/CurrentVolume` - Volume properties
 
 ## Building
 
 ```bash
-dotnet build InventorySort.sln
+dotnet build SortAvailableCargo.sln
 ```
 
 DLL auto-deploys to Pulsar Local directories when game is closed.

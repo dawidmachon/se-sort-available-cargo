@@ -5,26 +5,26 @@
     <Id>4F1BC801-9D1B-4ABC-BC30-2B425DBC2990</Id>
 
     <!-- GitHub repository ID -->
-    <RepoId>dawidmachon/se-inventory-sort</RepoId>
+    <RepoId>dawidmachon/se-sort-available-cargo</RepoId>
 
     <!-- The name of your plugin that will appear in the plugin list -->
-    <FriendlyName>Inventory Sort</FriendlyName>
+    <FriendlyName>Sort by Available Cargo</FriendlyName>
 
     <!-- The author name that you want to appear in the plugin list -->
     <Author>dawidmachon</Author>
 
     <!-- Optional tooltip for the plugin in the plugin list -->
-    <Tooltip>Sort inventory list by empty space, largest first</Tooltip>
+    <Tooltip>Sort inventory containers by remaining free cargo space (most empty first)</Tooltip>
 
     <!-- Optional plugin description. If omitted, this will be the same as the Tooltip. 1000 characters max. -->
-    <Description>Automatically sorts the inventory list shown when opening a ship or station inventory.
-
-By default, inventories are sorted by available space (most empty first) and largest containers appear at the top.
+    <Description>Adds a Sort checkbox to the ship/station inventory terminal that reorders containers by remaining free cargo space (most empty first).
 
 Features:
-- Sorts inventory containers by available capacity
-- Shows most empty, largest containers first
-- Toggle on/off via a button in the inventory UI</Description>
+- One-click Sort checkbox right in the inventory UI, next to Hide Empty
+- Most-empty cargo containers rise to the top so you can find a place to drop items fast
+- Hides itself on the character/suit filter (mirrors Hide Empty behavior)
+- State remembered across sessions, enabled by default
+- Optional setting to also sort the left (production) panel</Description>
 
     <!-- Only source code in the Directory entries listed in SourceDirectories is compiled. Exclude any test projects or similar. -->
     <SourceDirectories>

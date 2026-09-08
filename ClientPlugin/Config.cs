@@ -13,17 +13,41 @@ public class Config : INotifyPropertyChanged
     // Default ON - sort inventories by available space (biggest/emptiest first)
     private bool sortByAvailableSpace = true;
 
+    // Default OFF - also sort the left inventory panel (production blocks)
+    // Most users only want right panel sorted (cargo storage), since production
+    // blocks (assemblers, refineries) usually have items in process.
+    private bool sortLeftPanelToo = false;
+
+    // Default OFF - do NOT pin the active/opened container to the top of the sorted list.
+    // Every container (including the active one) is ordered purely by remaining space.
+    // Turn ON to restore vanilla behavior (active container always stays first).
+    private bool keepActiveContainerFirst = false;
+
     #endregion
 
     #region User interface
 
-    public readonly string Title = "Inventory Sort";
+    public readonly string Title = "Sort by Available Cargo";
 
     [Checkbox(description: "Sort inventory containers by available space (most empty first). Default: ON")]
     public bool SortByAvailableSpace
     {
         get => sortByAvailableSpace;
         set => SetField(ref sortByAvailableSpace, value);
+    }
+
+    [Checkbox(description: "Also sort the LEFT inventory panel (production blocks). Default: OFF - left panel keeps original alphabetical order, since production blocks usually have items.")]
+    public bool SortLeftPanelToo
+    {
+        get => sortLeftPanelToo;
+        set => SetField(ref sortLeftPanelToo, value);
+    }
+
+    [Checkbox(description: "Keep the active (opened) container pinned at the top of the list. Default: OFF - every container is sorted by space, turn ON for vanilla behavior.")]
+    public bool KeepActiveContainerFirst
+    {
+        get => keepActiveContainerFirst;
+        set => SetField(ref keepActiveContainerFirst, value);
     }
 
     #endregion

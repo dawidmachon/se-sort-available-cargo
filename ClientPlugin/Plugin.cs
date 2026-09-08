@@ -6,38 +6,105 @@ using HarmonyLib;
 using Sandbox.Graphics.GUI;
 using VRage.Plugins;
 using VRageMath;
-using Sandbox.Game.Gui;
+using VRage.Utils;
 using Sandbox.Game.Entities;
 using Sandbox.Game.Screens.Helpers;
-using System.Collections.Generic;
+using Sandbox.Game.Gui;
 using System;
+using System.Collections.Generic;
+using VRage.Game.Entity;
 
 // Define assembly version when compiled by Pulsar
 #if !DEV_BUILD
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("1.0.0.0")]
 #endif
-    
+
 namespace ClientPlugin;
 
 // ReSharper disable once UnusedType.Global
 public class Plugin : IPlugin
 {
-    public const string Name = "InventorySort";
+    public const string Name = "SortAvailableCargo";
     public static Plugin Instance { get; private set; }
     private SettingsGenerator settingsGenerator;
 
-    // Static state for UI buttons (must be static to persist across refreshes)
-    private static MyGuiControlCheckbox? s_sortBySpaceLeftCheckbox;
-    private static MyGuiControlCheckbox? s_sortBySpaceRightCheckbox;
-    private static MyGuiControlLabel? s_sortBySpaceLeftLabel;
-    private static MyGuiControlLabel? s_sortBySpaceRightLabel;
+    // Cached types resolved at runtime
+    private static Type? s_terminalInventoryControllerType;
+    private static Type? s_screenTerminalType;
+
+    // Cached reflection data
+    private static MethodInfo? s_getInventoryBaseMethod;
+    private static PropertyInfo? s_rightFilterProperty; // Returns current filter VisualStyle
+
+    // Cached field info for GetOwner lookups
+    private static FieldInfo? s_instanceField;
+    private static FieldInfo? s_controllerField;
+    private static FieldInfo? s_interactedOwnerField;
+    private static FieldInfo? s_userOwnerField;
+    private static FieldInfo? s_rightFilterTypeField;
+    private static FieldInfo? s_rightOwnersControlField;
+    private static FieldInfo? s_interactedGridOwnersField;
+    private static FieldInfo? s_interactedGridOwnersMechanicalField;
+    private static PropertyInfo? s_rightFilterTypeIndexProperty;
+    private static MethodInfo? s_createInventoryControlsInListMethod;
+    private static FieldInfo? s_searchBoxRightField;
+    private static MethodInfo? s_blockSearchRightTextChangedMethod;
+
+    // Cached owner values for current sort operation
+    private static MyEntity? s_cachedInteractedOwner;
+    private static MyEntity? s_cachedUserOwner;
+
+    // Cached Sort controls (for visibility updates)
+    private static MyGuiControlCheckbox? s_sortCheckbox;
+    private static MyGuiControlLabel? s_sortLabel;
+
+    // Tracks which panel is currently being sorted (set in CreateInventoryControlsInList_Patch.Prefix)
+    private static bool s_isLeftPanel;
+
+    // Cache of available space per inventory owner (cleared between sorts)
+    // Avoids re-computing MaxVolume-CurrentVolume for the same owner multiple times during one sort
+    private static readonly Dictionary<MyEntity, float> s_spaceCache = new Dictionary<MyEntity, float>();
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     public void Init(object gameInstance)
     {
         Instance = this;
         Instance.settingsGenerator = new SettingsGenerator();
+
+        // Resolve internal types at runtime
+        s_terminalInventoryControllerType = AccessTools.TypeByName("Sandbox.Game.Gui.MyTerminalInventoryController");
+        s_screenTerminalType = AccessTools.TypeByName("Sandbox.Game.Gui.MyGuiScreenTerminal");
+        var myEntityType = AccessTools.TypeByName("VRage.Game.Entity.MyEntity");
+
+        // GetInventoryBase is a public method on MyEntity that returns MyInventoryBase
+        if (myEntityType != null)
+        {
+            s_getInventoryBaseMethod = AccessTools.Method(myEntityType, "GetInventoryBase", new[] { typeof(int) });
+        }
+
+        // Cache field info for GetOwner lookups
+        if (s_screenTerminalType != null)
+        {
+            s_instanceField = AccessTools.Field(s_screenTerminalType, "m_instance");
+            s_controllerField = AccessTools.Field(s_screenTerminalType, "m_controllerInventory");
+        }
+        if (s_terminalInventoryControllerType != null)
+        {
+            s_interactedOwnerField = AccessTools.Field(s_terminalInventoryControllerType, "m_interactedAsOwner");
+            s_userOwnerField = AccessTools.Field(s_terminalInventoryControllerType, "m_userAsOwner");
+            s_rightFilterTypeField = AccessTools.Field(s_terminalInventoryControllerType, "m_rightFilterType");
+            s_rightOwnersControlField = AccessTools.Field(s_terminalInventoryControllerType, "m_rightOwnersControl");
+            s_interactedGridOwnersField = AccessTools.Field(s_terminalInventoryControllerType, "m_interactedGridOwners");
+            s_interactedGridOwnersMechanicalField = AccessTools.Field(s_terminalInventoryControllerType, "m_interactedGridOwnersMechanical");
+            s_rightFilterTypeIndexProperty = AccessTools.Property(s_terminalInventoryControllerType, "RightFilterTypeIndex");
+            s_rightFilterProperty = AccessTools.Property(s_terminalInventoryControllerType, "RightFilter");
+            s_searchBoxRightField = AccessTools.Field(s_terminalInventoryControllerType, "m_searchBoxRight");
+            s_blockSearchRightTextChangedMethod = AccessTools.Method(s_terminalInventoryControllerType, "BlockSearchRight_TextChanged");
+#pragma warning disable CS0618 // MyInventoryOwnerTypeEnum is obsolete but required by the game's CreateInventoryControlsInList signature
+            s_createInventoryControlsInListMethod = AccessTools.Method(s_terminalInventoryControllerType, "CreateInventoryControlsInList", new[] { typeof(List<MyEntity>), typeof(MyGuiControlList), typeof(MyInventoryOwnerTypeEnum?) });
+#pragma warning restore CS0618
+        }
 
         var harmony = new Harmony(Name);
         harmony.PatchAll(Assembly.GetExecutingAssembly());
@@ -60,70 +127,12 @@ public class Plugin : IPlugin
         MyGuiSandbox.AddScreen(Instance.settingsGenerator.Dialog);
     }
 
-    // Hook called when left checkbox is clicked
-    private static void OnLeftSortCheckboxChanged(MyGuiControlCheckbox checkbox)
-    {
-        Config.Current.SortByAvailableSpace = checkbox.IsChecked;
-        ConfigStorage.Save(Config.Current);
-        SyncCheckboxes(checkbox.IsChecked);
-    }
-
-    // Hook called when right checkbox is clicked
-    private static void OnRightSortCheckboxChanged(MyGuiControlCheckbox checkbox)
-    {
-        Config.Current.SortByAvailableSpace = checkbox.IsChecked;
-        ConfigStorage.Save(Config.Current);
-        SyncCheckboxes(checkbox.IsChecked);
-    }
-
-    // Keep both checkboxes in sync
-    private static void SyncCheckboxes(bool value)
-    {
-        if (s_sortBySpaceLeftCheckbox != null && s_sortBySpaceLeftCheckbox.IsChecked != value)
-            s_sortBySpaceLeftCheckbox.IsChecked = value;
-        if (s_sortBySpaceRightCheckbox != null && s_sortBySpaceRightCheckbox.IsChecked != value)
-            s_sortBySpaceRightCheckbox.IsChecked = value;
-    }
-
     // ===== HARMONY PATCHES =====
 
     /// <summary>
-    /// Patches CreateInventoryPageLeftSection to add our sort checkbox.
-    /// </summary>
-    [HarmonyPatch(typeof(MyGuiScreenTerminal), "CreateInventoryPageLeftSection")]
-    public static class CreateInventoryPageLeftSection_Patch
-    {
-        [HarmonyPostfix]
-        public static void Postfix(MyGuiControlTabPage page)
-        {
-            float num = -0.008f;
-            
-            // Create label for the checkbox (appears to the left)
-            s_sortBySpaceLeftLabel = new MyGuiControlLabel
-            {
-                Position = new Vector2(-0.06f + num, -0.225f),
-                Name = "SortBySpaceLeftLabel",
-                OriginAlign = MyGuiDrawAlignEnum.HORIZONTAL_RIGHT_AND_VERTICAL_CENTER,
-                Text = "Sort"
-            };
-
-            // Create the checkbox for left panel
-            s_sortBySpaceLeftCheckbox = new MyGuiControlCheckbox
-            {
-                Position = new Vector2(-0.0075f + num, -0.225f),
-                Name = "SortBySpaceLeft",
-                OriginAlign = MyGuiDrawAlignEnum.HORIZONTAL_RIGHT_AND_VERTICAL_CENTER,
-                IsChecked = Config.Current.SortByAvailableSpace
-            };
-            s_sortBySpaceLeftCheckbox.IsCheckedChanged += OnLeftSortCheckboxChanged;
-
-            page.Controls.Add(s_sortBySpaceLeftLabel);
-            page.Controls.Add(s_sortBySpaceLeftCheckbox);
-        }
-    }
-
-    /// <summary>
-    /// Patches CreateInventoryPageRightSection to add our sort checkbox.
+    /// Patches CreateInventoryPageRightSection to add our Sort checkbox next to Hide Empty.
+    /// Layout: [Search box] [Sort label Sort □] [Hide Empty label Hide Empty □]
+    /// Sort fits in the existing gap between search box end and Hide Empty label.
     /// </summary>
     [HarmonyPatch(typeof(MyGuiScreenTerminal), "CreateInventoryPageRightSection")]
     public static class CreateInventoryPageRightSection_Patch
@@ -131,140 +140,425 @@ public class Plugin : IPlugin
         [HarmonyPostfix]
         public static void Postfix(MyGuiControlTabPage page)
         {
-            float num = 0.004f;
+            // Skip if our controls already exist (page was reused)
+            if (page.Controls.GetControlByName("SortBySpaceRight") != null)
+                return;
 
-            // Create label for the checkbox (appears to the left)
-            s_sortBySpaceRightLabel = new MyGuiControlLabel
+            var searchBox = page.Controls.GetControlByName("BlockSearchRight") as MyGuiControlSearchBox;
+            var hideEmptyCheckbox = page.Controls.GetControlByName("CheckboxHideEmptyRight") as MyGuiControlCheckbox;
+            var hideEmptyLabel = page.Controls.GetControlByName("LabelHideEmptyRight") as MyGuiControlLabel;
+
+            if (searchBox == null || hideEmptyCheckbox == null || hideEmptyLabel == null)
+                return;
+
+            // Use exact Y from Hide Empty checkbox (game uses -0.255f)
+            float yPos = hideEmptyCheckbox.Position.Y;
+
+            // ===== Layout (explicit positions, no relative math) =====
+            // Game creates these with num=0.004f offset for right section:
+            //   Search box:        X = 0.0225f, LEFT-aligned, width = 0.361f - labelSize.X
+            //   Hide Empty label:  X = 0.419f, RIGHT-aligned, width ~0.08f, starts at 0.339f
+            //   Hide Empty checkbox: X = 0.467f, RIGHT-aligned, width ~0.025f, starts at 0.442f
+            //
+            // We need:
+            //   [Search box (shrunk)] [Sort label Sort □] [Hide Empty label Hide Empty □]
+            //
+            //   Make search box MUCH shorter (0.20f width). It will end at 0.0225+0.20 = 0.2225f.
+            //   Sort label right edge at 0.285f, left edge 0.245f (gap 0.0225f from search)
+            //   Sort checkbox right edge at 0.325f, left edge 0.30f (gap 0.04f... tight but OK)
+            //   Gap between Sort checkbox right edge and Hide Empty label left edge = 0.339 - 0.325 = 0.014f
+
+            // Shrink search box (only if wider than target - don't enlarge it under
+            // localizations where the vanilla "Hide Empty" label already makes it narrow)
+            if (searchBox.Size.X > 0.20f)
+                searchBox.Size = new Vector2(0.20f, searchBox.Size.Y);
+
+            // Sort label - RIGHT-aligned (right edge at 0.285f)
+            var sortLabel = new MyGuiControlLabel
             {
-                Position = new Vector2(0.41f + num, -0.225f),
+                Position = new Vector2(0.285f, yPos),
                 Name = "SortBySpaceRightLabel",
-                OriginAlign = MyGuiDrawAlignEnum.HORIZONTAL_RIGHT_AND_VERTICAL_CENTER,
+                OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
                 Text = "Sort"
             };
 
-            // Create the checkbox for right panel
-            s_sortBySpaceRightCheckbox = new MyGuiControlCheckbox
+            // Sort checkbox - RIGHT-aligned (right edge at 0.325f)
+            var sortCheckbox = new MyGuiControlCheckbox
             {
-                Position = new Vector2(0.463f + num, -0.225f),
+                Position = new Vector2(0.325f, yPos),
                 Name = "SortBySpaceRight",
-                OriginAlign = MyGuiDrawAlignEnum.HORIZONTAL_RIGHT_AND_VERTICAL_CENTER,
+                OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
                 IsChecked = Config.Current.SortByAvailableSpace
             };
-            s_sortBySpaceRightCheckbox.IsCheckedChanged += OnRightSortCheckboxChanged;
 
-            page.Controls.Add(s_sortBySpaceRightLabel);
-            page.Controls.Add(s_sortBySpaceRightCheckbox);
+            // Tooltip on hover
+            sortCheckbox.SetToolTip("Sort inventories by available space (most empty first)");
+
+            // Visibility based on filter (like Hide Empty)
+            // Visible on all filters EXCEPT FilterCharacter (where there's only 1 inventory)
+            bool isCharacterFilter = IsRightFilterCharacter();
+            sortCheckbox.Visible = !isCharacterFilter;
+            sortLabel.Visible = !isCharacterFilter;
+
+            // Store in static fields for later access
+            s_sortCheckbox = sortCheckbox;
+            s_sortLabel = sortLabel;
+
+            sortCheckbox.IsCheckedChanged += OnSortCheckboxChanged;
+            page.Controls.Add(sortLabel);
+            page.Controls.Add(sortCheckbox);
+        }
+    }
+
+    private static void OnSortCheckboxChanged(MyGuiControlCheckbox checkbox)
+    {
+        Config.Current.SortByAvailableSpace = checkbox.IsChecked;
+        ConfigStorage.Save(Config.Current);
+        RefreshInventoryList();
+    }
+
+    /// <summary>
+    /// Triggers a refresh of the inventory list by directly calling CreateInventoryControlsInList.
+    /// After the rebuild it re-applies the search text + Hide Empty filter and restores the
+    /// focused inventory, mirroring what the game does after its own rebuilds
+    /// (searchBox.SearchText = searchBox.SearchText fires BlockSearchRight_TextChanged).
+    /// </summary>
+    private static void RefreshInventoryList()
+    {
+        try
+        {
+            // On the character filter the right list shows a single inventory (not the grid list)
+            // and our checkbox is hidden - rebuilding here would corrupt the view.
+            if (IsRightFilterCharacter())
+                return;
+
+            if (s_instanceField == null || s_controllerField == null) return;
+            if (s_rightOwnersControlField == null || s_interactedGridOwnersField == null) return;
+            if (s_rightFilterTypeIndexProperty == null || s_rightFilterTypeField == null) return;
+            if (s_createInventoryControlsInListMethod == null) return;
+
+            var instance = s_instanceField.GetValue(null) as MyGuiScreenTerminal;
+            if (instance == null) return;
+
+            var controller = s_controllerField.GetValue(instance);
+            if (controller == null) return;
+
+            var owners = s_interactedGridOwnersField.GetValue(controller) as List<MyEntity>;
+            var ownersMechanical = s_interactedGridOwnersMechanicalField?.GetValue(controller) as List<MyEntity>;
+            var rightOwnersControl = s_rightOwnersControlField.GetValue(controller) as MyGuiControlList;
+#pragma warning disable CS0618 // MyInventoryOwnerTypeEnum is obsolete but required by the game's CreateInventoryControlsInList signature
+            var filterType = s_rightFilterTypeField.GetValue(controller) as MyInventoryOwnerTypeEnum?;
+#pragma warning restore CS0618
+            var filterTypeIndex = (int?)s_rightFilterTypeIndexProperty.GetValue(controller);
+
+            if (owners == null || rightOwnersControl == null) return;
+
+            // Same logic as the game: mechanical (index 2) filter uses the mechanical owners list
+            var ownersToUse = (filterTypeIndex == 2 && ownersMechanical != null) ? ownersMechanical : owners;
+
+            // Rebuild the list. The Harmony Prefix/Postfix on CreateInventoryControlsInList
+            // handle owner-cache setup/cleanup around the sort.
+            s_createInventoryControlsInListMethod.Invoke(controller, new object[] { ownersToUse, rightOwnersControl, filterType });
+
+            // The rebuild replaced every control (new controls default to Visible=true),
+            // which drops both the Hide Empty filter and any active search text, and leaves
+            // the focused inventory pointing at a destroyed control. Re-apply exactly like
+            // the game does: BlockSearchRight_TextChanged runs SearchInList (search + hide
+            // empty) and re-focuses the first visible inventory.
+            if (s_searchBoxRightField != null && s_blockSearchRightTextChangedMethod != null)
+            {
+                var searchBox = s_searchBoxRightField.GetValue(controller) as MyGuiControlSearchBox;
+                if (searchBox != null)
+                    s_blockSearchRightTextChangedMethod.Invoke(controller, new object[] { searchBox.SearchText });
+            }
+        }
+        catch
+        {
+            // Silently ignore refresh failures - the list will still work, just won't re-sort immediately
         }
     }
 
     /// <summary>
-    /// Patches the inventory sorting. When sort by available space is enabled,
-    /// we sort by remaining capacity (biggest first = most empty containers first).
+    /// Patches CreateInventoryControlsInList to set owner cache before sorting begins.
     /// </summary>
-    [HarmonyPatch(typeof(MyTerminalInventoryController), "CreateInventoryControlsInList")]
+    [HarmonyPatch]
     public static class CreateInventoryControlsInList_Patch
     {
-        [HarmonyPrefix]
-        public static void Prefix(List<MyEntity> owners, MyGuiControlList listControl, MyInventoryOwnerTypeEnum? filterType, MyTerminalInventoryController __instance)
+        private static MethodInfo TargetMethod()
         {
-            // Store the current sort preference for the Compare method
-            s_currentSortBySpace = Config.Current.SortByAvailableSpace;
-            s_currentController = __instance;
+            return AccessTools.Method(s_terminalInventoryControllerType, "CreateInventoryControlsInList");
+        }
+
+        [HarmonyPrefix]
+        public static void Prefix(object[] __args)
+        {
+            // Detect which panel we're sorting by checking the listControl parameter
+            // listControl is m_leftOwnersControl or m_rightOwnersControl
+            if (s_rightOwnersControlField == null || s_controllerField == null || s_instanceField == null)
+            {
+                s_isLeftPanel = false;
+                return;
+            }
+
+            try
+            {
+                var instance = s_instanceField.GetValue(null) as MyGuiScreenTerminal;
+                var controller = s_controllerField.GetValue(instance);
+                var rightList = s_rightOwnersControlField.GetValue(controller) as MyGuiControlList;
+
+                // __args[1] is the listControl parameter
+                if (__args != null && __args.Length > 1)
+                {
+                    s_isLeftPanel = !ReferenceEquals(__args[1], rightList);
+                }
+                else
+                {
+                    s_isLeftPanel = false;
+                }
+            }
+            catch
+            {
+                s_isLeftPanel = false;
+            }
+
+            // Only cache owner values for RIGHT panel when sorting is enabled
+            // Left panel keeps original game sorting (alphabetical)
+            if (s_isLeftPanel && !Config.Current.SortLeftPanelToo)
+            {
+                ClearOwnerCache();
+                return;
+            }
+
+            CacheOwnerValues();
         }
 
         [HarmonyPostfix]
-        public static void Postfix(List<MyEntity> owners, MyGuiControlList listControl, MyInventoryOwnerTypeEnum? filterType, MyTerminalInventoryController __instance)
+        public static void Postfix()
         {
-            // Reset after sorting
-            s_currentSortBySpace = false;
-            s_currentController = null;
-        }
-        
-        // Static fields to pass state to the comparison method
-        private static bool s_currentSortBySpace;
-        private static MyTerminalInventoryController? s_currentController;
-        
-        // Public accessor for the comparison
-        public static int CompareInventoryOwnersBySpace(MyGuiControlBase x, MyGuiControlBase y)
-        {
-            var ownerX = x as MyGuiControlInventoryOwner;
-            var ownerY = y as MyGuiControlInventoryOwner;
-
-            if (ownerX == null && ownerY == null) return 0;
-            if (ownerX == null) return -1;
-            if (ownerY == null) return 1;
-
-            // Get the private fields using reflection
-            var interactedOwner = GetField<MyEntity>("m_interactedAsOwner");
-            var userOwner = GetField<MyEntity>("m_userAsOwner");
-
-            // Keep interacted/user owner at the top
-            if (ownerX.InventoryOwner == interactedOwner || ownerX.InventoryOwner == userOwner)
-                return -1;
-            if (ownerY.InventoryOwner == interactedOwner || ownerY.InventoryOwner == userOwner)
-                return 1;
-
-            // If not sorting by space, use default alphabetical sort
-            if (!s_currentSortBySpace)
-            {
-                return string.Compare(ownerX.InventoryOwner?.DisplayNameText, ownerY.InventoryOwner?.DisplayNameText);
-            }
-
-            // Sort by available space (biggest first = most empty containers first)
-            float spaceX = GetTotalAvailableSpace(ownerX);
-            float spaceY = GetTotalAvailableSpace(ownerY);
-
-            // Descending order - bigger available space first
-            // If equal, fall back to alphabetical
-            if (Math.Abs(spaceX - spaceY) > 0.0001f)
-            {
-                return spaceX > spaceY ? -1 : 1;
-            }
-
-            return string.Compare(ownerX.InventoryOwner?.DisplayNameText, ownerY.InventoryOwner?.DisplayNameText);
-        }
-
-        private static T? GetField<T>(string fieldName) where T : class
-        {
-            if (s_currentController == null) return null;
-            var field = typeof(MyTerminalInventoryController).GetField(fieldName, 
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            return field?.GetValue(s_currentController) as T;
-        }
-
-        private static float GetTotalAvailableSpace(MyGuiControlInventoryOwner owner)
-        {
-            float totalAvailable = 0f;
-            if (owner?.InventoryOwner != null && owner.InventoryOwner.HasInventory)
-            {
-                foreach (var inv in owner.InventoryOwner.GetInventories())
-                {
-                    if (inv != null)
-                    {
-                        totalAvailable += (float)(inv.MaxVolume - inv.CurrentVolume);
-                    }
-                }
-            }
-            return totalAvailable;
+            ClearOwnerCache();
+            s_isLeftPanel = false;
         }
     }
 
     /// <summary>
-    /// Patches the CompareGuiControlInventoryOwners to use our custom sort when enabled.
+    /// Patches the right type group selection change to update Sort checkbox visibility.
+    /// Mirrors Hide Empty behavior - Sort is hidden on character filter only.
     /// </summary>
-    [HarmonyPatch(typeof(MyTerminalInventoryController), "CompareGuiControlInventoryOwners")]
-    public static class CompareGuiControlInventoryOwners_Patch
+    [HarmonyPatch]
+    public static class RightTypeGroup_SelectedChanged_Patch
     {
-        [HarmonyPrefix]
-        public static bool Prefix(MyGuiControlBase x, MyGuiControlBase y, MyTerminalInventoryController __instance, ref int __result)
+        private static MethodInfo TargetMethod()
         {
-            // If sorting by space is disabled, use original logic
-            if (!Config.Current.SortByAvailableSpace)
-                return true; // Run original
-
-            // Use our custom comparison
-            __result = CreateInventoryControlsInList_Patch.CompareInventoryOwnersBySpace(x, y);
-            return false; // Skip original
+            // RightTypeGroup_SelectedChanged(MyGuiControlRadioButtonGroup obj)
+            return AccessTools.Method(s_terminalInventoryControllerType, "RightTypeGroup_SelectedChanged");
         }
+
+        [HarmonyPostfix]
+        public static void Postfix()
+        {
+            // Update Sort visibility - hide only on FilterCharacter
+            bool isCharacterFilter = IsRightFilterCharacter();
+            bool visible = !isCharacterFilter;
+
+            if (s_sortCheckbox != null) s_sortCheckbox.Visible = visible;
+            if (s_sortLabel != null) s_sortLabel.Visible = visible;
+        }
+    }
+
+    /// <summary>
+    /// Patches CompareGuiControlInventoryOwners to sort by available space when enabled.
+    /// </summary>
+    [HarmonyPatch]
+    public static class CompareInventoryOwners_Patch
+    {
+        private static MethodInfo TargetMethod()
+        {
+            return AccessTools.Method(s_terminalInventoryControllerType, "CompareGuiControlInventoryOwners");
+        }
+
+        [HarmonyPrefix]
+        public static bool Prefix(MyGuiControlBase x, MyGuiControlBase y, ref int __result)
+        {
+            var sortEnabled = Config.Current.SortByAvailableSpace;
+
+            if (!sortEnabled)
+                return true;
+
+            // Only sort the RIGHT panel by default.
+            // Left panel (production blocks) keeps original alphabetical order unless explicitly enabled.
+            if (s_isLeftPanel && !Config.Current.SortLeftPanelToo)
+                return true;
+
+            var ownerX = x as MyGuiControlInventoryOwner;
+            var ownerY = y as MyGuiControlInventoryOwner;
+
+            if (ownerX == null)
+            {
+                __result = ownerY == null ? 0 : -1;
+                return false;
+            }
+            if (ownerY == null)
+            {
+                __result = 1;
+                return false;
+            }
+
+            var interactedOwner = s_cachedInteractedOwner;
+            var userOwner = s_cachedUserOwner;
+
+            // Keep interacted/user owner at the top (vanilla behavior).
+            // Configurable: KeepActiveContainerFirst (default OFF). When ON, the active
+            // container is pinned to the top like vanilla; when OFF it participates in
+            // sorting like any other container.
+            if (Config.Current.KeepActiveContainerFirst)
+            {
+                if (ownerX.InventoryOwner == interactedOwner || ownerX.InventoryOwner == userOwner)
+                {
+                    __result = -1;
+                    return false;
+                }
+                if (ownerY.InventoryOwner == interactedOwner || ownerY.InventoryOwner == userOwner)
+                {
+                    __result = 1;
+                    return false;
+                }
+            }
+
+            // Sort by available space (most empty first)
+            float spaceX = GetTotalAvailableSpace(ownerX);
+            float spaceY = GetTotalAvailableSpace(ownerY);
+
+            if (Math.Abs(spaceX - spaceY) > 0.0001f)
+            {
+                __result = spaceX > spaceY ? -1 : 1;
+                return false;
+            }
+
+            __result = string.Compare(ownerX.InventoryOwner?.DisplayNameText, ownerY.InventoryOwner?.DisplayNameText);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Caches owner values before sorting begins.
+    /// </summary>
+    private static void CacheOwnerValues()
+    {
+        s_cachedInteractedOwner = null;
+        s_cachedUserOwner = null;
+
+        if (s_instanceField == null || s_controllerField == null ||
+            s_interactedOwnerField == null || s_userOwnerField == null)
+            return;
+
+        var instance = s_instanceField.GetValue(null) as MyGuiScreenTerminal;
+        if (instance == null) return;
+
+        var controller = s_controllerField.GetValue(instance);
+        if (controller == null) return;
+
+        s_cachedInteractedOwner = s_interactedOwnerField.GetValue(controller) as MyEntity;
+        s_cachedUserOwner = s_userOwnerField.GetValue(controller) as MyEntity;
+    }
+
+    /// <summary>
+    /// Clears cached owner values and space cache. Called after sorting completes.
+    /// </summary>
+    private static void ClearOwnerCache()
+    {
+        s_cachedInteractedOwner = null;
+        s_cachedUserOwner = null;
+        s_spaceCache.Clear();
+    }
+
+    /// <summary>
+    /// Checks if the right inventory panel is currently showing character inventory.
+    /// When true, Sort should be hidden (only one inventory).
+    /// When false, Sort should be visible (multiple inventories to sort).
+    /// </summary>
+    private static bool IsRightFilterCharacter()
+    {
+        if (s_rightFilterProperty == null) return false;
+        if (s_instanceField == null || s_controllerField == null) return false;
+
+        try
+        {
+            var instance = s_instanceField.GetValue(null) as MyGuiScreenTerminal;
+            if (instance == null) return false;
+
+            var controller = s_controllerField.GetValue(instance);
+            if (controller == null) return false;
+
+            // RightFilter returns MyGuiControlRadioButtonStyleEnum
+            var filter = s_rightFilterProperty.GetValue(controller);
+            if (filter == null) return false;
+
+            // FilterCharacter = 0 in MyGuiControlRadioButtonStyleEnum
+            // FilterGrid = 1
+            int filterValue = (int)filter;
+            return filterValue == 0; // FilterCharacter
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Gets total available space (MaxVolume - CurrentVolume) for all inventories.
+    /// Uses GetInventoryBase (public method on MyEntity).
+    /// Uses RawValue field of MyFixedPoint for proper float conversion.
+    /// Caches results per owner during a single sort to avoid reflection overhead.
+    /// </summary>
+    private static float GetTotalAvailableSpace(MyGuiControlInventoryOwner? owner)
+    {
+        if (owner?.InventoryOwner == null || !owner.InventoryOwner.HasInventory)
+            return 0f;
+
+        // Cache lookup - same owner is compared multiple times during a sort
+        if (s_spaceCache.TryGetValue(owner.InventoryOwner, out float cached))
+            return cached;
+
+        float totalAvailable = 0f;
+        if (s_getInventoryBaseMethod == null)
+            return 0f;
+
+        int inventoryCount = owner.InventoryOwner.InventoryCount;
+        for (int i = 0; i < inventoryCount; i++)
+        {
+            var inv = s_getInventoryBaseMethod.Invoke(owner.InventoryOwner, new object[] { i });
+            if (inv == null)
+                break;
+
+            // Use late binding to get properties from actual instance type
+            var invType = inv.GetType();
+            var maxProp = invType.GetProperty("MaxVolume");
+            var curProp = invType.GetProperty("CurrentVolume");
+
+            if (maxProp != null && curProp != null)
+            {
+                var maxVol = maxProp.GetValue(inv);
+                var curVol = curProp.GetValue(inv);
+
+                if (maxVol != null && curVol != null)
+                {
+                    // Convert MyFixedPoint to float via RawValue (long) / 1,000,000
+                    // MyFixedPoint is stored as millionths in RawValue
+                    var fpType = maxVol.GetType();
+                    var rawValueField = fpType.GetField("RawValue");
+
+                    if (rawValueField != null)
+                    {
+                        long maxRaw = (long)rawValueField.GetValue(maxVol);
+                        long curRaw = (long)rawValueField.GetValue(curVol);
+                        // Convert from millionths to float
+                        totalAvailable += (maxRaw - curRaw) / 1000000f;
+                    }
+                }
+            }
+        }
+
+        s_spaceCache[owner.InventoryOwner] = totalAvailable;
+        return totalAvailable;
     }
 }
