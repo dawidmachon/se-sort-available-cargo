@@ -130,45 +130,48 @@ public class Plugin : IPlugin
 
             if (searchBox != null && hideEmptyCheckbox != null)
             {
-                // Shrink search bar to make room for Sort checkbox to the left of Hide Empty
-                // Original search bar: starts at 0.0185f, width ~0.340f
-                // Hide Empty checkbox at ~0.419f
-                // We need ~0.10f for Sort label + checkbox
-                float sortSpaceNeeded = 0.10f;
-                float searchBarRightEdge = 0.0185f + searchBox.Size.X;
-                float newSearchWidth = searchBarRightEdge - sortSpaceNeeded - 0.0185f;
-                if (newSearchWidth > 0.20f) // Minimum reasonable width for search
+                // Layout: [Search box] [Sort □] [Hide Empty □]
+                // Space between search box end and Hide Empty checkbox
+                float searchBarEnd = searchBox.Position.X + searchBox.Size.X;
+                float hideEmptyX = hideEmptyCheckbox.Position.X;
+                float availableSpace = hideEmptyX - searchBarEnd;
+
+                // Shrink search bar to make room for Sort checkbox (~0.08f needed)
+                float sortSpaceNeeded = 0.09f; // Label + checkbox + padding
+                if (availableSpace < sortSpaceNeeded)
                 {
-                    searchBox.Size = new Vector2(newSearchWidth, searchBox.Size.Y);
+                    float newWidth = searchBox.Size.X - (sortSpaceNeeded - availableSpace);
+                    if (newWidth > 0.15f) // Minimum reasonable width
+                    {
+                        searchBox.Size = new Vector2(newWidth, searchBox.Size.Y);
+                    }
                 }
 
-                // Position Sort in the same row as Hide Empty (y = -0.255f)
-                // Place it to the LEFT of Hide Empty checkbox
+                // Position Sort checkbox right after search bar, before Hide Empty
                 float yPos = hideEmptyCheckbox.Position.Y;
+                float sortX = searchBox.Position.X + searchBox.Size.X + 0.005f;
 
-                // Sort checkbox - to the left of Hide Empty
+                // Sort checkbox
                 var sortCheckbox = new MyGuiControlCheckbox
                 {
-                    Position = new Vector2(hideEmptyCheckbox.Position.X - 0.01f, yPos),
+                    Position = new Vector2(sortX, yPos),
                     Name = "SortBySpaceRight",
-                    OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
+                    OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER,
                     IsChecked = Config.Current.SortByAvailableSpace
                 };
 
-                // Sort label - to the left of Sort checkbox
+                // Sort label - to the left of checkbox
                 var sortLabel = new MyGuiControlLabel
                 {
-                    Position = new Vector2(sortCheckbox.Position.X - 0.025f, yPos),
+                    Position = new Vector2(sortX - 0.04f, yPos),
                     Name = "SortBySpaceRightLabel",
                     OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
                     Text = "Sort"
                 };
 
                 sortCheckbox.IsCheckedChanged += OnSortCheckboxChanged;
-
-                // Add in reverse order so they appear left-to-right: label, then checkbox
-                page.Controls.Add(sortCheckbox);
                 page.Controls.Add(sortLabel);
+                page.Controls.Add(sortCheckbox);
             }
         }
     }
