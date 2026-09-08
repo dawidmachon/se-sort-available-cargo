@@ -121,6 +121,40 @@ public class Plugin : IPlugin
     {
         Config.Current.SortByAvailableSpace = checkbox.IsChecked;
         ConfigStorage.Save(Config.Current);
+        
+        // Trigger a rebuild of the right inventory list to apply the new sort order
+        RefreshInventoryList();
+    }
+    
+    /// <summary>
+    /// Triggers a refresh of the inventory list by calling SetRightFilter.
+    /// This causes CreateInventoryControlsInList to be called, which will use our
+    /// CompareInventoryOwners_Patch to sort by available space.
+    /// </summary>
+    private static void RefreshInventoryList()
+    {
+        if (s_screenTerminalType == null) return;
+        
+        // Get the screen instance
+        var instanceField = AccessTools.Field(s_screenTerminalType, "m_instance");
+        var instance = instanceField?.GetValue(null) as MyGuiScreenTerminal;
+        if (instance == null) return;
+        
+        // Get the controller
+        var controllerField = AccessTools.Field(s_screenTerminalType, "m_controllerInventory");
+        var controller = controllerField?.GetValue(instance);
+        if (controller == null) return;
+        
+        // Call SetRightFilter via reflection to trigger list rebuild
+        // This method is called when filter changes and it rebuilds the inventory list
+        var setRightFilterMethod = AccessTools.Method(s_terminalInventoryControllerType, "SetRightFilter");
+        var getRightFilterMethod = AccessTools.Property(s_terminalInventoryControllerType, "RightFilter");
+        
+        if (setRightFilterMethod != null && getRightFilterMethod != null)
+        {
+            var currentFilter = getRightFilterMethod.GetValue(controller);
+            setRightFilterMethod.Invoke(controller, new[] { currentFilter });
+        }
     }
 
     /// <summary>
