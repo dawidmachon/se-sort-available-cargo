@@ -191,7 +191,15 @@ public class Plugin : IPlugin
         catch (Exception ex)
         {
             // Log but don't crash - the plugin should be resilient
-            MyLog.Default.WriteLine($"[InventorySort] RefreshInventoryList failed: {ex.Message}");
+            // MyLog.Default may be null early in startup, so check before logging
+            try
+            {
+                MyLog.Default?.WriteLine($"[InventorySort] RefreshInventoryList failed: {ex.Message}");
+            }
+            catch
+            {
+                // Ignore logging failures
+            }
         }
     }
 
