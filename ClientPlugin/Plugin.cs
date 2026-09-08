@@ -379,16 +379,22 @@ public class Plugin : IPlugin
             var interactedOwner = s_cachedInteractedOwner;
             var userOwner = s_cachedUserOwner;
 
-            // Keep interacted/user owner at the top
-            if (ownerX.InventoryOwner == interactedOwner || ownerX.InventoryOwner == userOwner)
+            // Keep interacted/user owner at the top (vanilla behavior).
+            // Configurable: KeepActiveContainerFirst (default ON). When OFF, the active
+            // container participates in sorting like any other — useful if you want the
+            // list ordered purely by available space and don't need the active container pinned.
+            if (Config.Current.KeepActiveContainerFirst)
             {
-                __result = -1;
-                return false;
-            }
-            if (ownerY.InventoryOwner == interactedOwner || ownerY.InventoryOwner == userOwner)
-            {
-                __result = 1;
-                return false;
+                if (ownerX.InventoryOwner == interactedOwner || ownerX.InventoryOwner == userOwner)
+                {
+                    __result = -1;
+                    return false;
+                }
+                if (ownerY.InventoryOwner == interactedOwner || ownerY.InventoryOwner == userOwner)
+                {
+                    __result = 1;
+                    return false;
+                }
             }
 
             // Sort by available space (most empty first)

@@ -44,6 +44,7 @@ Client plugin that adds a sort checkbox to the terminal inventory panel, allowin
 |---------|---------|-------------|
 | SortByAvailableSpace | true | Enable space-based sorting |
 | SortLeftPanelToo | false | Also sort left (production) panel |
+| KeepActiveContainerFirst | true | Pin the active/opened container to the top (vanilla behavior). OFF = sort applies to all containers including the active one. Only effective when SortByAvailableSpace is on. |
 
 Config file: `%AppData%\Roaming\SpaceEngineers\Storage\SortAvailableCargo.cfg`
 
