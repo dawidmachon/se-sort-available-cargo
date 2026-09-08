@@ -63,7 +63,7 @@ public class Plugin : IPlugin
         // Resolve internal types at runtime
         s_terminalInventoryControllerType = AccessTools.TypeByName("Sandbox.Game.Gui.MyTerminalInventoryController");
         s_screenTerminalType = AccessTools.TypeByName("Sandbox.Game.Gui.MyGuiScreenTerminal");
-        var myInventoryType = AccessTools.TypeByName("Sandbox.Game.Game.Entities.MyInventory");
+        var myInventoryType = AccessTools.TypeByName("Sandbox.Game.Entities.MyInventory");
 
         if (myInventoryType != null)
         {
@@ -160,7 +160,7 @@ public class Plugin : IPlugin
                 float yPos = hideEmptyCheckbox.Position.Y;
                 float sortX = searchBox.Position.X + searchBox.Size.X + 0.005f;
 
-                // Sort checkbox - label removed to avoid overlap, checkbox alone is enough
+                // Sort checkbox + label to the right
                 var sortCheckbox = new MyGuiControlCheckbox
                 {
                     Position = new Vector2(sortX, yPos),
@@ -169,8 +169,18 @@ public class Plugin : IPlugin
                     IsChecked = Config.Current.SortByAvailableSpace
                 };
 
+                // Sort label - to the RIGHT of checkbox
+                var sortLabel = new MyGuiControlLabel
+                {
+                    Position = new Vector2(sortX + 0.035f, yPos),
+                    Name = "SortBySpaceRightLabel",
+                    OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER,
+                    Text = "Sort"
+                };
+
                 sortCheckbox.IsCheckedChanged += OnSortCheckboxChanged;
                 page.Controls.Add(sortCheckbox);
+                page.Controls.Add(sortLabel);
             }
         }
     }
@@ -323,7 +333,7 @@ public class Plugin : IPlugin
                 return false;
             }
 
-            // Sort by available space (biggest first = most empty containers first)
+            // Sort by available space (most empty first)
             float spaceX = GetTotalAvailableSpace(ownerX);
             float spaceY = GetTotalAvailableSpace(ownerY);
 
@@ -344,7 +354,8 @@ public class Plugin : IPlugin
     }
 
     /// <summary>
-    /// Caches owner values before sorting begins. Called from CreateInventoryControlsInList_Patch.Prefix.
+    /// Gets total available space (MaxVolume - CurrentVolume) for all inventories.
+    /// Used for sorting: inventories with most available space first.
     /// </summary>
     private static void CacheOwnerValues()
     {
@@ -376,35 +387,26 @@ public class Plugin : IPlugin
 
     private static float GetTotalAvailableSpace(MyGuiControlInventoryOwner? owner)
     {
-        float totalAvailable = 0f;
-        if (owner?.InventoryOwner != null && owner.InventoryOwner.HasInventory)
-        {
-            if (s_getInventoryMethod == null) return 0f;
+        if (owner?.InventoryOwner == null || !owner.InventoryOwner.HasInventory)
+            return 0f;
 
-            // Use InventoryCount like game code instead of hardcoded limit
-            int inventoryCount = owner.InventoryOwner.InventoryCount;
-            for (int i = 0; i < inventoryCount; i++)
-            {
-                var inv = s_getInventoryMethod.Invoke(owner.InventoryOwner, new object[] { i });
-                if (inv == null) break;
-                
-                // Use reflection to get MaxVolume and CurrentVolume
-                // Use direct cast like game code: (float)MaxVolume - (float)CurrentVolume
-                if (s_inventoryMaxVolume != null && s_inventoryCurrentVolume != null)
-                {
-                    var maxVol = s_inventoryMaxVolume.GetValue(inv);
-                    var curVol = s_inventoryCurrentVolume.GetValue(inv);
-                    if (maxVol != null && curVol != null)
-                    {
-                        float maxFloat = (float)maxVol;
-                        float curFloat = (float)curVol;
-                        totalAvailable += maxFloat - curFloat;
-                        // Debug log for volume values
-                        try { MyLog.Default?.WriteLine($"[InventorySort] {owner.InventoryOwner.DisplayNameText} inv{i}: max={maxFloat:F4} cur={curFloat:F4} avail={maxFloat - curFloat:F4}"); } catch {}
-                    }
-                }
-            }
-        }
-        return totalAvailable;
+        if (s_getInventoryMethod == null || s_inventoryMaxVolume == null || s_inventoryCurrentVolume == null)
+            return 0f;
+
+        // Use first inventory only (most containers have just one)
+        var inv = s_getInventoryMethod.Invoke(owner.InventoryOwner, new object[] { 0 });
+        if (inv == null)
+            return 0f;
+
+        var maxVol = s_inventoryMaxVolume.GetValue(inv);
+        var curVol = s_inventoryCurrentVolume.GetValue(inv);
+
+        if (maxVol == null || curVol == null)
+            return 0f;
+
+        // MyFixedPoint to float: (float)MyFixedPoint gives volume in cubic meters
+        float maxFloat = (float)maxVol;
+        float curFloat = (float)curVol;
+        return maxFloat - curFloat; // Available space = max - current
     }
 }
