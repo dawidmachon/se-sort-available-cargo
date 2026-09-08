@@ -123,31 +123,47 @@ public class Plugin : IPlugin
             if (page.Controls.GetControlByName("SortBySpaceRight") != null)
                 return;
 
-            // Find the RightFilterAllButton to position ourselves consistently
-            var filterButton = page.Controls.GetControlByName("RightFilterAllButton") as MyGuiControlRadioButton;
+            // Find the search bar to make it smaller and fit Sort checkbox
+            var searchBox = page.Controls.GetControlByName("BlockSearchRight") as MyGuiControlSearchBox;
+            // Find Hide Empty elements
+            var hideEmptyLabel = page.Controls.GetControlByName("LabelHideEmptyRight") as MyGuiControlLabel;
+            var hideEmptyCheckbox = page.Controls.GetControlByName("CheckboxHideEmptyRight") as MyGuiControlCheckbox;
 
-            if (filterButton != null)
+            if (searchBox != null && hideEmptyLabel != null && hideEmptyCheckbox != null)
             {
-                // Place Sort in the filter button row (y aligned with filter buttons)
-                // Position X = 0.20f - in the gap between search bar (X~0.018) and filter buttons (X~0.275)
-                float yPos = filterButton.Position.Y;
+                // Calculate available space: from search bar start to Hide Empty label start
+                // Search bar starts at X = 0.0185f, Hide Empty label at X = 0.415f
+                // We need about 0.08f for Sort label + checkbox
+                float sortSpaceNeeded = 0.08f;
+                float availableStart = 0.0185f;
+                float hideEmptyStart = hideEmptyLabel.Position.X;
 
-                // Sort checkbox - in the gap between search bar and filter buttons
-                var sortCheckbox = new MyGuiControlCheckbox
+                // Shrink search bar to make room for Sort
+                float newSearchWidth = hideEmptyStart - sortSpaceNeeded - availableStart - 0.02f;
+                if (newSearchWidth > 0.15f) // Minimum reasonable width
                 {
-                    Position = new Vector2(0.20f, yPos),
-                    Name = "SortBySpaceRight",
-                    OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER,
-                    IsChecked = Config.Current.SortByAvailableSpace
-                };
+                    searchBox.Size = new Vector2(newSearchWidth, searchBox.Size.Y);
+                }
 
-                // Sort label - to the left of checkbox
+                // Position Sort to the left of Hide Empty
+                float yPos = hideEmptyCheckbox.Position.Y;
+
+                // Sort label - to the left of Hide Empty checkbox
                 var sortLabel = new MyGuiControlLabel
                 {
-                    Position = new Vector2(sortCheckbox.Position.X - 0.01f, yPos),
+                    Position = new Vector2(hideEmptyStart - 0.07f, yPos),
                     Name = "SortBySpaceRightLabel",
                     OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
                     Text = "Sort"
+                };
+
+                // Sort checkbox - to the left of Sort label
+                var sortCheckbox = new MyGuiControlCheckbox
+                {
+                    Position = new Vector2(sortLabel.Position.X - 0.025f, yPos),
+                    Name = "SortBySpaceRight",
+                    OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
+                    IsChecked = Config.Current.SortByAvailableSpace
                 };
 
                 sortCheckbox.IsCheckedChanged += OnSortCheckboxChanged;
@@ -249,8 +265,13 @@ public class Plugin : IPlugin
         [HarmonyPrefix]
         public static bool Prefix(MyGuiControlBase x, MyGuiControlBase y, ref int __result)
         {
+            var sortEnabled = Config.Current.SortByAvailableSpace;
+            
+            // Debug log
+            try { MyLog.Default?.WriteLine($"[InventorySort] SortEnabled={sortEnabled}, X={x?.GetType().Name}, Y={y?.GetType().Name}"); } catch {}
+            
             // If sorting by space is disabled, use original logic
-            if (!Config.Current.SortByAvailableSpace)
+            if (!sortEnabled)
                 return true;
 
             var ownerX = x as MyGuiControlInventoryOwner;
@@ -286,6 +307,9 @@ public class Plugin : IPlugin
             // Sort by available space (biggest first = most empty containers first)
             float spaceX = GetTotalAvailableSpace(ownerX);
             float spaceY = GetTotalAvailableSpace(ownerY);
+
+            // Debug log
+            try { MyLog.Default?.WriteLine($"[InventorySort] {ownerX.InventoryOwner?.DisplayNameText}:{spaceX:F2} vs {ownerY.InventoryOwner?.DisplayNameText}:{spaceY:F2}"); } catch {}
 
             // Descending order - bigger available space first
             // If equal, fall back to alphabetical
