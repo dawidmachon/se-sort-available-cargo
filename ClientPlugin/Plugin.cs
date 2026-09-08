@@ -335,20 +335,22 @@ public class Plugin : IPlugin
         {
             if (s_getInventoryMethod == null) return 0f;
 
-            // Use cached GetInventory method to get each inventory
-            for (int i = 0; i < 10; i++) // Max 10 inventories
+            // Use InventoryCount like game code instead of hardcoded limit
+            int inventoryCount = owner.InventoryOwner.InventoryCount;
+            for (int i = 0; i < inventoryCount; i++)
             {
                 var inv = s_getInventoryMethod.Invoke(owner.InventoryOwner, new object[] { i });
                 if (inv == null) break;
                 
                 // Use reflection to get MaxVolume and CurrentVolume
+                // Use direct cast like game code: (float)MaxVolume - (float)CurrentVolume
                 if (s_inventoryMaxVolume != null && s_inventoryCurrentVolume != null)
                 {
                     var maxVol = s_inventoryMaxVolume.GetValue(inv);
                     var curVol = s_inventoryCurrentVolume.GetValue(inv);
                     if (maxVol != null && curVol != null)
                     {
-                        totalAvailable += (float)(Convert.ToDouble(maxVol) - Convert.ToDouble(curVol));
+                        totalAvailable += (float)maxVol - (float)curVol;
                     }
                 }
             }
