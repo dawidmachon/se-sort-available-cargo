@@ -19,7 +19,7 @@ using VRage.Game.Entity;
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("1.0.0.0")]
 #endif
-    
+
 namespace ClientPlugin;
 
 // ReSharper disable once UnusedType.Global
@@ -32,12 +32,13 @@ public class Plugin : IPlugin
     // Cached types resolved at runtime
     private static Type? s_terminalInventoryControllerType;
     private static Type? s_screenTerminalType;
+    private static Type? s_myInventoryType;
+    private static Type? s_myEntityExtensionsType;
 
     // Cached reflection data
+    private static MethodInfo? s_getInventoryMethod; // MyEntityExtensions.GetInventory(MyEntity, int)
     private static PropertyInfo? s_inventoryMaxVolume;
     private static PropertyInfo? s_inventoryCurrentVolume;
-    private static MethodInfo? s_getInventoryMethod;
-    private static MethodInfo? s_setRightFilterMethod;
 
     // Cached field info for GetOwner lookups (avoid repeated AccessTools.Field calls)
     private static FieldInfo? s_instanceField;
@@ -63,19 +64,20 @@ public class Plugin : IPlugin
         // Resolve internal types at runtime
         s_terminalInventoryControllerType = AccessTools.TypeByName("Sandbox.Game.Gui.MyTerminalInventoryController");
         s_screenTerminalType = AccessTools.TypeByName("Sandbox.Game.Gui.MyGuiScreenTerminal");
-        var myInventoryType = AccessTools.TypeByName("Sandbox.Game.Entities.MyInventory");
+        s_myInventoryType = AccessTools.TypeByName("Sandbox.Game.MyInventory"); // Note: Sandbox.Game, not Sandbox.Game.Entities
+        s_myEntityExtensionsType = AccessTools.TypeByName("Sandbox.Game.Entities.MyEntityExtensions");
 
-        if (myInventoryType != null)
+        // GetInventory extension method: MyEntityExtensions.GetInventory(MyEntity thisEntity, int index = 0)
+        if (s_myEntityExtensionsType != null)
         {
-            s_inventoryMaxVolume = AccessTools.Property(myInventoryType, "MaxVolume");
-            s_inventoryCurrentVolume = AccessTools.Property(myInventoryType, "CurrentVolume");
-            s_getInventoryMethod = AccessTools.Method(myInventoryType, "GetInventory");
+            s_getInventoryMethod = AccessTools.Method(s_myEntityExtensionsType, "GetInventory", new[] { typeof(MyEntity), typeof(int) });
         }
 
-        // Cache filter-related methods
-        if (s_terminalInventoryControllerType != null)
+        // MaxVolume and CurrentVolume are on MyInventory
+        if (s_myInventoryType != null)
         {
-            s_setRightFilterMethod = AccessTools.Method(s_terminalInventoryControllerType, "SetRightFilter");
+            s_inventoryMaxVolume = AccessTools.Property(s_myInventoryType, "MaxVolume");
+            s_inventoryCurrentVolume = AccessTools.Property(s_myInventoryType, "CurrentVolume");
         }
 
         // Cache field info for GetOwner lookups
@@ -132,56 +134,71 @@ public class Plugin : IPlugin
             if (page.Controls.GetControlByName("SortBySpaceRight") != null)
                 return;
 
-            // Find the search bar to make room for Sort checkbox
+            // Find the search bar and Hide Empty controls
             var searchBox = page.Controls.GetControlByName("BlockSearchRight") as MyGuiControlSearchBox;
-            // Find Hide Empty checkbox
             var hideEmptyCheckbox = page.Controls.GetControlByName("CheckboxHideEmptyRight") as MyGuiControlCheckbox;
+            var hideEmptyLabel = page.Controls.GetControlByName("LabelHideEmptyRight") as MyGuiControlLabel;
 
-            if (searchBox != null && hideEmptyCheckbox != null)
+            if (searchBox == null || hideEmptyCheckbox == null || hideEmptyLabel == null)
+                return;
+
+            // ===== Smart layout =====
+            // Original positions:
+            // Hide Empty Label: X=0.415f, RIGHT-aligned
+            // Hide Empty Checkbox: X=0.463f, RIGHT-aligned
+            // Search Box: X=0.0185f, width=0.361f-labelSize.X, ends around 0.38f
+            
+            // We need space for: Sort Label + Sort Checkbox + padding (~0.12f total)
+            // Strategy: Move Hide Empty right, shrink search box, place Sort in middle
+
+            const float sortTotalWidth = 0.12f; // Label + checkbox + padding
+            
+            // Get the hide empty label size (it's RIGHT-aligned, so text ends before X)
+            float hideLabelX = hideEmptyLabel.Position.X; // 0.415f
+            
+            // Shrink search box to make room - new width = original - sortTotalWidth
+            float originalSearchWidth = searchBox.Size.X;
+            searchBox.Size = new Vector2(originalSearchWidth - sortTotalWidth, searchBox.Size.Y);
+
+            // Calculate new positions
+            // Search box ends at: 0.0185f + (originalSearchWidth - 0.12f)
+            // Hide Empty Checkbox at: 0.463f + 0.12f = 0.583f (moved right)
+            // Sort checkbox at: Hide Label X - 0.02f (just to the left of Hide Label)
+            // Sort label at: Sort checkbox X - checkbox_width - 0.01f
+
+            float newHideLabelX = hideLabelX + sortTotalWidth;
+            float newHideCheckboxX = hideEmptyCheckbox.Position.X + sortTotalWidth;
+
+            // Move Hide Empty right
+            hideEmptyLabel.Position = new Vector2(newHideLabelX, hideEmptyLabel.Position.Y);
+            hideEmptyCheckbox.Position = new Vector2(newHideCheckboxX, hideEmptyCheckbox.Position.Y);
+
+            // Place Sort elements between search box and Hide Empty
+            // Search box ends at: 0.0185f + newWidth
+            float searchBoxEndX = 0.0185f + searchBox.Size.X;
+            
+            // Sort checkbox: right after search box, LEFT-aligned so its LEFT edge is at searchBoxEndX
+            float sortCheckboxX = searchBoxEndX + 0.01f; // small gap
+            var sortCheckbox = new MyGuiControlCheckbox
             {
-                // Layout: [Search box] [Sort □] [Hide Empty □]
-                // Space between search box end and Hide Empty checkbox
-                float searchBarEnd = searchBox.Position.X + searchBox.Size.X;
-                float hideEmptyX = hideEmptyCheckbox.Position.X;
-                float availableSpace = hideEmptyX - searchBarEnd;
+                Position = new Vector2(sortCheckboxX, hideEmptyCheckbox.Position.Y),
+                Name = "SortBySpaceRight",
+                OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER,
+                IsChecked = Config.Current.SortByAvailableSpace
+            };
 
-                // Shrink search bar to make room for Sort checkbox (~0.08f needed)
-                float sortSpaceNeeded = 0.09f; // Label + checkbox + padding
-                if (availableSpace < sortSpaceNeeded)
-                {
-                    float newWidth = searchBox.Size.X - (sortSpaceNeeded - availableSpace);
-                    if (newWidth > 0.15f) // Minimum reasonable width
-                    {
-                        searchBox.Size = new Vector2(newWidth, searchBox.Size.Y);
-                    }
-                }
+            // Sort label: to the LEFT of checkbox, LEFT-aligned
+            var sortLabel = new MyGuiControlLabel
+            {
+                Position = new Vector2(sortCheckboxX, hideEmptyLabel.Position.Y),
+                Name = "SortBySpaceRightLabel",
+                OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER,
+                Text = "Sort"
+            };
 
-                // Position Sort checkbox right after search bar, before Hide Empty
-                float yPos = hideEmptyCheckbox.Position.Y;
-                float sortX = searchBox.Position.X + searchBox.Size.X + 0.005f;
-
-                // Sort checkbox + label to the right
-                var sortCheckbox = new MyGuiControlCheckbox
-                {
-                    Position = new Vector2(sortX, yPos),
-                    Name = "SortBySpaceRight",
-                    OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER,
-                    IsChecked = Config.Current.SortByAvailableSpace
-                };
-
-                // Sort label - to the RIGHT of checkbox
-                var sortLabel = new MyGuiControlLabel
-                {
-                    Position = new Vector2(sortX + 0.035f, yPos),
-                    Name = "SortBySpaceRightLabel",
-                    OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER,
-                    Text = "Sort"
-                };
-
-                sortCheckbox.IsCheckedChanged += OnSortCheckboxChanged;
-                page.Controls.Add(sortCheckbox);
-                page.Controls.Add(sortLabel);
-            }
+            sortCheckbox.IsCheckedChanged += OnSortCheckboxChanged;
+            page.Controls.Add(sortLabel);
+            page.Controls.Add(sortCheckbox);
         }
     }
 
@@ -189,18 +206,11 @@ public class Plugin : IPlugin
     {
         Config.Current.SortByAvailableSpace = checkbox.IsChecked;
         ConfigStorage.Save(Config.Current);
-        
-        // Debug log
-        try { MyLog.Default?.WriteLine($"[InventorySort] Checkbox clicked, SortEnabled={checkbox.IsChecked}"); } catch {}
-        
-        // Trigger a rebuild of the right inventory list to apply the new sort order
         RefreshInventoryList();
     }
-    
+
     /// <summary>
     /// Triggers a refresh of the inventory list by directly calling CreateInventoryControlsInList.
-    /// This bypasses SetRightFilter which has internal logic that might skip the rebuild.
-    /// The CreateInventoryControlsInList_Patch will handle cache setup/cleanup.
     /// </summary>
     private static void RefreshInventoryList()
     {
@@ -228,14 +238,11 @@ public class Plugin : IPlugin
 
             if (owners == null || rightOwnersControl == null) return;
 
-            // Use same logic as SetRightFilter: if filterTypeIndex == 2, use mechanical owners
-            var ownersToUse = (filterTypeIndex == 2) ? owners : owners;
-
             // Cache owner values before rebuilding the list
             CacheOwnerValues();
 
             // Directly call CreateInventoryControlsInList
-            s_createInventoryControlsInListMethod.Invoke(controller, new object[] { ownersToUse, rightOwnersControl, filterType });
+            s_createInventoryControlsInListMethod.Invoke(controller, new object[] { owners, rightOwnersControl, filterType });
 
             // Clear cache after list is built
             ClearOwnerCache();
@@ -243,13 +250,12 @@ public class Plugin : IPlugin
         catch (Exception ex)
         {
             // Log but don't crash
-            try { MyLog.Default?.WriteLine($"[InventorySort] RefreshInventoryList failed: {ex}"); } catch {}
+            try { MyLog.Default?.WriteLine($"[InventorySort] RefreshInventoryList failed: {ex.Message}"); } catch {}
         }
     }
 
     /// <summary>
     /// Patches CreateInventoryControlsInList to set owner cache before sorting begins.
-    /// This ensures the cache is populated regardless of how the list is rebuilt.
     /// </summary>
     [HarmonyPatch]
     public static class CreateInventoryControlsInList_Patch
@@ -262,18 +268,12 @@ public class Plugin : IPlugin
         [HarmonyPrefix]
         public static void Prefix()
         {
-            // Debug log
-            try { MyLog.Default?.WriteLine("[InventorySort] CreateInventoryControlsInList Prefix"); } catch {}
-            // Cache owner values before sorting begins
             CacheOwnerValues();
         }
 
         [HarmonyPostfix]
         public static void Postfix()
         {
-            // Debug log
-            try { MyLog.Default?.WriteLine("[InventorySort] CreateInventoryControlsInList Postfix"); } catch {}
-            // Clear cache after sorting completes
             ClearOwnerCache();
         }
     }
@@ -281,7 +281,6 @@ public class Plugin : IPlugin
     /// <summary>
     /// Patches the CompareGuiControlInventoryOwners method to support sorting by available space.
     /// When SortByAvailableSpace is enabled, inventories are sorted by remaining capacity (emptiest first).
-    /// This patch affects both left and right inventory lists.
     /// </summary>
     [HarmonyPatch]
     public static class CompareInventoryOwners_Patch
@@ -295,10 +294,7 @@ public class Plugin : IPlugin
         public static bool Prefix(MyGuiControlBase x, MyGuiControlBase y, ref int __result)
         {
             var sortEnabled = Config.Current.SortByAvailableSpace;
-            
-            // Debug log
-            try { MyLog.Default?.WriteLine($"[InventorySort] SortEnabled={sortEnabled}, X={x?.GetType().Name}, Y={y?.GetType().Name}"); } catch {}
-            
+
             // If sorting by space is disabled, use original logic
             if (!sortEnabled)
                 return true;
@@ -317,7 +313,7 @@ public class Plugin : IPlugin
                 return false;
             }
 
-            // Use cached owner values (set once per sort operation by CreateInventoryControlsInList_Patch)
+            // Use cached owner values
             var interactedOwner = s_cachedInteractedOwner;
             var userOwner = s_cachedUserOwner;
 
@@ -337,9 +333,6 @@ public class Plugin : IPlugin
             float spaceX = GetTotalAvailableSpace(ownerX);
             float spaceY = GetTotalAvailableSpace(ownerY);
 
-            // Debug log
-            try { MyLog.Default?.WriteLine($"[InventorySort] {ownerX.InventoryOwner?.DisplayNameText}:{spaceX:F2} vs {ownerY.InventoryOwner?.DisplayNameText}:{spaceY:F2}"); } catch {}
-
             // Descending order - bigger available space first
             // If equal, fall back to alphabetical
             if (Math.Abs(spaceX - spaceY) > 0.0001f)
@@ -354,8 +347,7 @@ public class Plugin : IPlugin
     }
 
     /// <summary>
-    /// Gets total available space (MaxVolume - CurrentVolume) for all inventories.
-    /// Used for sorting: inventories with most available space first.
+    /// Caches owner values before sorting begins.
     /// </summary>
     private static void CacheOwnerValues()
     {
@@ -385,28 +377,39 @@ public class Plugin : IPlugin
         s_cachedUserOwner = null;
     }
 
+    /// <summary>
+    /// Gets total available space (MaxVolume - CurrentVolume) for all inventories.
+    /// Uses MyEntityExtensions.GetInventory extension method.
+    /// </summary>
     private static float GetTotalAvailableSpace(MyGuiControlInventoryOwner? owner)
     {
+        float totalAvailable = 0f;
         if (owner?.InventoryOwner == null || !owner.InventoryOwner.HasInventory)
             return 0f;
 
         if (s_getInventoryMethod == null || s_inventoryMaxVolume == null || s_inventoryCurrentVolume == null)
             return 0f;
 
-        // Use first inventory only (most containers have just one)
-        var inv = s_getInventoryMethod.Invoke(owner.InventoryOwner, new object[] { 0 });
-        if (inv == null)
-            return 0f;
+        // Sum all inventories (multi-inventory containers like refineries/assemblers)
+        int inventoryCount = owner.InventoryOwner.InventoryCount;
+        for (int i = 0; i < inventoryCount; i++)
+        {
+            // Call MyEntityExtensions.GetInventory(owner, index)
+            var inv = s_getInventoryMethod.Invoke(null, new object[] { owner.InventoryOwner, i });
+            if (inv == null)
+                break;
 
-        var maxVol = s_inventoryMaxVolume.GetValue(inv);
-        var curVol = s_inventoryCurrentVolume.GetValue(inv);
+            var maxVol = s_inventoryMaxVolume.GetValue(inv);
+            var curVol = s_inventoryCurrentVolume.GetValue(inv);
 
-        if (maxVol == null || curVol == null)
-            return 0f;
-
-        // MyFixedPoint to float: (float)MyFixedPoint gives volume in cubic meters
-        float maxFloat = (float)maxVol;
-        float curFloat = (float)curVol;
-        return maxFloat - curFloat; // Available space = max - current
+            if (maxVol != null && curVol != null)
+            {
+                // MyFixedPoint can be cast directly to float
+                float maxF = (float)maxVol;
+                float curF = (float)curVol;
+                totalAvailable += maxF - curF;
+            }
+        }
+        return totalAvailable;
     }
 }

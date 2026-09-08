@@ -15,16 +15,8 @@ public static class ConfigStorage
     {
         var path = ConfigFilePath;
         Directory.CreateDirectory(Path.GetDirectoryName(path));
-        try
-        {
-            using (var text = File.CreateText(path))
-                new XmlSerializer(typeof(Config)).Serialize(text, config);
-            MyLog.Default?.WriteLine($"[InventorySort] Config saved, SortByAvailableSpace={config.SortByAvailableSpace}");
-        }
-        catch (Exception ex)
-        {
-            MyLog.Default?.WriteLine($"[InventorySort] Config save failed: {ex}");
-        }
+        using (var text = File.CreateText(path))
+            new XmlSerializer(typeof(Config)).Serialize(text, config);
     }
 
     public static Config Load()
