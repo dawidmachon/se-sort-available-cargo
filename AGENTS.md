@@ -2,6 +2,17 @@
 
 Client plugin that adds a sort button to the inventory UI, allowing users to sort inventory containers by available space (biggest/emptiest first).
 
+## Review Requirements
+
+**IMPORTANT:** For ANY code changes, perform MULTI-PASS review before declaring done:
+
+1. **Pass 1 - Architecture**: Read full code, trace data flow, null safety on reflection
+2. **Pass 2 - Performance**: Reflection caching, GC pressure, per-operation costs
+3. **Pass 3 - Edge Cases**: Lifecycle, event handlers, page reuse, race conditions
+4. **Pass 4 - Integration**: How patches interact with each other and game code
+
+Do NOT say "verification complete" after one pass. Found bugs in passes 1, 2, 3, and 4.
+
 ## Features
 
 - Adds a "Sort" checkbox to both left and right inventory panels in the terminal
