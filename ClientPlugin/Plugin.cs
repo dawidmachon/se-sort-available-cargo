@@ -348,7 +348,7 @@ public class Plugin : IPlugin
                     var curVol = s_inventoryCurrentVolume.GetValue(inv);
                     if (maxVol != null && curVol != null)
                     {
-                        totalAvailable += (float)maxVol - (float)curVol;
+                        totalAvailable += (float)(Convert.ToDouble(maxVol) - Convert.ToDouble(curVol));
                     }
                 }
             }
