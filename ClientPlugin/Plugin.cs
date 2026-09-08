@@ -110,6 +110,10 @@ public class Plugin : IPlugin
         [HarmonyPostfix]
         public static void Postfix(MyGuiControlTabPage page)
         {
+            // Skip if our controls already exist (page was reused)
+            if (page.Controls.GetControlByName("SortBySpaceRight") != null)
+                return;
+
             // Find the Hide Empty label and checkbox by name
             var hideEmptyLabel = page.Controls.GetControlByName("LabelHideEmptyRight") as MyGuiControlLabel;
             var hideEmptyCheckbox = page.Controls.GetControlByName("CheckboxHideEmptyRight") as MyGuiControlCheckbox;
