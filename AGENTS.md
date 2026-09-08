@@ -1,5 +1,8 @@
 # se-inventory-sort
 
+Status: LOCAL-ONLY
+Category: public
+
 Client plugin that adds a sort button to the inventory UI, allowing users to sort inventory containers by available space (biggest/emptiest first).
 
 ## Review Requirements
