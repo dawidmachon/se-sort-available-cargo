@@ -128,14 +128,11 @@ public class Plugin : IPlugin
 
             if (filterButton != null)
             {
-                // Place Sort in the filter button row (y = -0.338f), to the right of filter buttons
-                // Filter buttons extend to about X = 0.55f, inventory list starts at X = 0.465f
-                // We place Sort label + checkbox at X = 0.56f to 0.60f (in the gap above inventory list)
-                // Use Y aligned with filter buttons (y = -0.338f)
+                // Place Sort in the filter button row (y aligned with filter buttons)
+                // Position X = 0.20f - in the gap between search bar (X~0.018) and filter buttons (X~0.275)
                 float yPos = filterButton.Position.Y;
 
-                // Sort checkbox - in the gap between search bar (X~0.018) and filter buttons (X~0.275)
-                // Use X = 0.20f which is centered in that gap
+                // Sort checkbox - in the gap between search bar and filter buttons
                 var sortCheckbox = new MyGuiControlCheckbox
                 {
                     Position = new Vector2(0.20f, yPos),
