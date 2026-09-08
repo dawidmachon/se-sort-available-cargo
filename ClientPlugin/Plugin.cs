@@ -10,7 +10,6 @@ using VRage.Utils;
 using Sandbox.Game.Entities;
 using Sandbox.Game.Screens.Helpers;
 using Sandbox.Game.Gui;
-using System.Collections.Generic;
 using System;
 using VRage.Game.Entity;
 
@@ -31,6 +30,7 @@ public class Plugin : IPlugin
 
     // Cached types resolved at runtime
     private static Type? s_terminalInventoryControllerType;
+    private static Type? s_screenTerminalType;
 
     // Cached reflection data
     private static PropertyInfo? s_inventoryMaxVolume;
@@ -44,6 +44,7 @@ public class Plugin : IPlugin
 
         // Resolve internal types at runtime
         s_terminalInventoryControllerType = AccessTools.TypeByName("Sandbox.Game.Gui.MyTerminalInventoryController");
+        s_screenTerminalType = AccessTools.TypeByName("Sandbox.Game.Gui.MyGuiScreenTerminal");
         var myInventoryType = AccessTools.TypeByName("Sandbox.Game.Game.Entities.MyInventory");
 
         if (myInventoryType != null)
@@ -125,6 +126,7 @@ public class Plugin : IPlugin
     /// <summary>
     /// Patches the CompareGuiControlInventoryOwners method to support sorting by available space.
     /// When SortByAvailableSpace is enabled, inventories are sorted by remaining capacity (emptiest first).
+    /// This patch affects both left and right inventory lists.
     /// </summary>
     [HarmonyPatch]
     public static class CompareInventoryOwners_Patch
@@ -137,9 +139,9 @@ public class Plugin : IPlugin
         [HarmonyPrefix]
         public static bool Prefix(MyGuiControlBase x, MyGuiControlBase y, ref int __result)
         {
-            // Check if space-based sorting is enabled
+            // If sorting by space is disabled, use original logic
             if (!Config.Current.SortByAvailableSpace)
-                return true; // Run original method
+                return true;
 
             var ownerX = x as MyGuiControlInventoryOwner;
             var ownerY = y as MyGuiControlInventoryOwner;
@@ -155,7 +157,7 @@ public class Plugin : IPlugin
                 return false;
             }
 
-            // Get interacted/user owners via reflection to prioritize them
+            // Get interacted/user owners to prioritize them
             var interactedOwner = GetOwner("m_interactedAsOwner");
             var userOwner = GetOwner("m_userAsOwner");
 
@@ -191,15 +193,13 @@ public class Plugin : IPlugin
     private static MyEntity? GetOwner(string fieldName)
     {
         if (s_terminalInventoryControllerType == null) return null;
+        if (s_screenTerminalType == null) return null;
         
-        var screenType = AccessTools.TypeByName("Sandbox.Game.Gui.MyGuiScreenTerminal");
-        if (screenType == null) return null;
-        
-        var instanceField = AccessTools.Field(screenType, "m_instance");
+        var instanceField = AccessTools.Field(s_screenTerminalType, "m_instance");
         var instance = instanceField?.GetValue(null) as MyGuiScreenTerminal;
         if (instance == null) return null;
         
-        var controllerField = AccessTools.Field(screenType, "m_controllerInventory");
+        var controllerField = AccessTools.Field(s_screenTerminalType, "m_controllerInventory");
         var controller = controllerField?.GetValue(instance);
         if (controller == null) return null;
         
