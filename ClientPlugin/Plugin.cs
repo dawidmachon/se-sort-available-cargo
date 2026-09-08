@@ -134,10 +134,11 @@ public class Plugin : IPlugin
                 // Use Y aligned with filter buttons (y = -0.338f)
                 float yPos = filterButton.Position.Y;
 
-                // Sort checkbox - place at X = 0.60f, same Y as filter buttons
+                // Sort checkbox - in the gap between search bar (X~0.018) and filter buttons (X~0.275)
+                // Use X = 0.20f which is centered in that gap
                 var sortCheckbox = new MyGuiControlCheckbox
                 {
-                    Position = new Vector2(0.60f, yPos),
+                    Position = new Vector2(0.20f, yPos),
                     Name = "SortBySpaceRight",
                     OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER,
                     IsChecked = Config.Current.SortByAvailableSpace
