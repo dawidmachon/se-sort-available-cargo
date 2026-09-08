@@ -18,11 +18,10 @@ public class Config : INotifyPropertyChanged
     // blocks (assemblers, refineries) usually have items in process.
     private bool sortLeftPanelToo = false;
 
-    // Default ON - keep the active/opened container pinned to the top of the sorted list
-    // (vanilla behavior). Turn OFF to let sorting apply to all containers including the
-    // one you currently have open — useful if the active container is already full and
-    // you want to jump straight to the next emptiest one.
-    private bool keepActiveContainerFirst = true;
+    // Default OFF - do NOT pin the active/opened container to the top of the sorted list.
+    // Every container (including the active one) is ordered purely by remaining space.
+    // Turn ON to restore vanilla behavior (active container always stays first).
+    private bool keepActiveContainerFirst = false;
 
     #endregion
 
@@ -44,7 +43,7 @@ public class Config : INotifyPropertyChanged
         set => SetField(ref sortLeftPanelToo, value);
     }
 
-    [Checkbox(description: "Keep the active (opened) container pinned to the top of the sorted list. Default: ON. Turn OFF to apply sorting to every container including the active one — then the active container will be ordered purely by remaining space, exactly like the others. Only takes effect when 'Sort by available space' is ON.")]
+    [Checkbox(description: "Keep the active (opened) container pinned at the top of the list. Default: OFF - every container is sorted by space, turn ON for vanilla behavior.")]
     public bool KeepActiveContainerFirst
     {
         get => keepActiveContainerFirst;

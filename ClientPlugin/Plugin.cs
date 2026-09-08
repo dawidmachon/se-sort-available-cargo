@@ -32,7 +32,6 @@ public class Plugin : IPlugin
     // Cached types resolved at runtime
     private static Type? s_terminalInventoryControllerType;
     private static Type? s_screenTerminalType;
-    private static Type? s_radioButtonStyleEnumType; // MyGuiControlRadioButtonStyleEnum
 
     // Cached reflection data
     private static MethodInfo? s_getInventoryBaseMethod;
@@ -46,6 +45,7 @@ public class Plugin : IPlugin
     private static FieldInfo? s_rightFilterTypeField;
     private static FieldInfo? s_rightOwnersControlField;
     private static FieldInfo? s_interactedGridOwnersField;
+    private static FieldInfo? s_interactedGridOwnersMechanicalField;
     private static PropertyInfo? s_rightFilterTypeIndexProperty;
     private static MethodInfo? s_createInventoryControlsInListMethod;
 
@@ -94,9 +94,9 @@ public class Plugin : IPlugin
             s_rightFilterTypeField = AccessTools.Field(s_terminalInventoryControllerType, "m_rightFilterType");
             s_rightOwnersControlField = AccessTools.Field(s_terminalInventoryControllerType, "m_rightOwnersControl");
             s_interactedGridOwnersField = AccessTools.Field(s_terminalInventoryControllerType, "m_interactedGridOwners");
+            s_interactedGridOwnersMechanicalField = AccessTools.Field(s_terminalInventoryControllerType, "m_interactedGridOwnersMechanical");
             s_rightFilterTypeIndexProperty = AccessTools.Property(s_terminalInventoryControllerType, "RightFilterTypeIndex");
             s_rightFilterProperty = AccessTools.Property(s_terminalInventoryControllerType, "RightFilter");
-            s_radioButtonStyleEnumType = AccessTools.TypeByName("VRage.Game.MyGuiControlRadioButtonStyleEnum");
             s_createInventoryControlsInListMethod = AccessTools.Method(s_terminalInventoryControllerType, "CreateInventoryControlsInList", new[] { typeof(List<MyEntity>), typeof(MyGuiControlList), typeof(MyInventoryOwnerTypeEnum?) });
         }
 
@@ -228,14 +228,15 @@ public class Plugin : IPlugin
             if (controller == null) return;
 
             var owners = s_interactedGridOwnersField.GetValue(controller) as List<MyEntity>;
+            var ownersMechanical = s_interactedGridOwnersMechanicalField?.GetValue(controller) as List<MyEntity>;
             var rightOwnersControl = s_rightOwnersControlField.GetValue(controller) as MyGuiControlList;
             var filterType = s_rightFilterTypeField.GetValue(controller) as MyInventoryOwnerTypeEnum?;
             var filterTypeIndex = (int?)s_rightFilterTypeIndexProperty.GetValue(controller);
 
             if (owners == null || rightOwnersControl == null) return;
 
-            // Use same logic as SetRightFilter
-            var ownersToUse = (filterTypeIndex == 2) ? owners : owners;
+            // Same logic as the game: mechanical (index 2) filter uses the mechanical owners list
+            var ownersToUse = (filterTypeIndex == 2 && ownersMechanical != null) ? ownersMechanical : owners;
 
             // Cache owner values before rebuilding
             CacheOwnerValues();
@@ -380,9 +381,9 @@ public class Plugin : IPlugin
             var userOwner = s_cachedUserOwner;
 
             // Keep interacted/user owner at the top (vanilla behavior).
-            // Configurable: KeepActiveContainerFirst (default ON). When OFF, the active
-            // container participates in sorting like any other — useful if you want the
-            // list ordered purely by available space and don't need the active container pinned.
+            // Configurable: KeepActiveContainerFirst (default OFF). When ON, the active
+            // container is pinned to the top like vanilla; when OFF it participates in
+            // sorting like any other container.
             if (Config.Current.KeepActiveContainerFirst)
             {
                 if (ownerX.InventoryOwner == interactedOwner || ownerX.InventoryOwner == userOwner)
@@ -451,7 +452,7 @@ public class Plugin : IPlugin
     /// </summary>
     private static bool IsRightFilterCharacter()
     {
-        if (s_rightFilterProperty == null || s_radioButtonStyleEnumType == null) return false;
+        if (s_rightFilterProperty == null) return false;
         if (s_instanceField == null || s_controllerField == null) return false;
 
         try
@@ -475,18 +476,6 @@ public class Plugin : IPlugin
         {
             return false;
         }
-    }
-
-    /// <summary>
-    /// Updates Sort checkbox visibility based on current filter.
-    /// </summary>
-    private static void UpdateSortVisibility()
-    {
-        bool isCharacterFilter = IsRightFilterCharacter();
-        bool visible = !isCharacterFilter;
-
-        if (s_sortCheckbox != null) s_sortCheckbox.Visible = visible;
-        if (s_sortLabel != null) s_sortLabel.Visible = visible;
     }
 
     /// <summary>

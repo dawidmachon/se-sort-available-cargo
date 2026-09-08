@@ -35,7 +35,7 @@ State is remembered per-user and restored next session.
 |---|---|---|
 | `SortByAvailableSpace` | ON | Master switch for inventory sorting. |
 | `SortLeftPanelToo` | OFF | Also sort the left (production) panel. Off by default because production blocks usually have items in progress. |
-| `KeepActiveContainerFirst` | ON | When ON (vanilla behavior), the currently opened container is pinned to the top of the sorted list even if it isn't the most empty. Turn OFF to apply sorting to every container including the active one — then the active container is ordered by available space just like the others. Only takes effect when `SortByAvailableSpace` is ON. |
+| `KeepActiveContainerFirst` | OFF | When ON, restores vanilla behavior: the currently opened container is pinned to the top of the sorted list even if it isn't the most empty. Default OFF means every container — including the active one — is ordered purely by available cargo space. Only takes effect when `SortByAvailableSpace` is ON. |
 
 ## How It Works
 
