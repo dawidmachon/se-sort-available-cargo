@@ -6,6 +6,7 @@ using HarmonyLib;
 using Sandbox.Graphics.GUI;
 using VRage.Plugins;
 using VRageMath;
+using VRage.Utils;
 using Sandbox.Game.Entities;
 using Sandbox.Game.Screens.Helpers;
 using Sandbox.Game.Gui;
@@ -73,6 +74,114 @@ public class Plugin : IPlugin
     }
 
     // ===== HARMONY PATCHES =====
+
+    /// <summary>
+    /// Patches CreateInventoryPageLeftSection to add our Sort checkbox next to Hide Empty.
+    /// Hide Empty checkbox is at X = -0.0075f + num, where num = -0.008f.
+    /// We place our checkbox to the left of Hide Empty.
+    /// </summary>
+    [HarmonyPatch(typeof(MyGuiScreenTerminal), "CreateInventoryPageLeftSection")]
+    public static class CreateInventoryPageLeftSection_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(MyGuiControlTabPage page)
+        {
+            // Find the Hide Empty label and checkbox by name
+            var hideEmptyLabel = page.Controls.GetControlByName("LabelHideEmptyLeft") as MyGuiControlLabel;
+            var hideEmptyCheckbox = page.Controls.GetControlByName("CheckboxHideEmptyLeft") as MyGuiControlCheckbox;
+
+            if (hideEmptyLabel != null)
+            {
+                // Place Sort label to the left of Hide Empty label
+                var sortLabel = new MyGuiControlLabel
+                {
+                    Position = new Vector2(hideEmptyLabel.Position.X - 0.048f, hideEmptyLabel.Position.Y),
+                    Name = "SortBySpaceLeftLabel",
+                    OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
+                    Text = "Sort"
+                };
+
+                // Place Sort checkbox to the left of Sort label
+                var sortCheckbox = new MyGuiControlCheckbox
+                {
+                    Position = new Vector2(sortLabel.Position.X - 0.048f, hideEmptyCheckbox?.Position.Y ?? hideEmptyLabel.Position.Y),
+                    Name = "SortBySpaceLeft",
+                    OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
+                    IsChecked = Config.Current.SortByAvailableSpace
+                };
+                sortCheckbox.IsCheckedChanged += OnLeftSortCheckboxChanged;
+
+                page.Controls.Add(sortLabel);
+                page.Controls.Add(sortCheckbox);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Patches CreateInventoryPageRightSection to add our Sort checkbox next to Hide Empty.
+    /// </summary>
+    [HarmonyPatch(typeof(MyGuiScreenTerminal), "CreateInventoryPageRightSection")]
+    public static class CreateInventoryPageRightSection_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(MyGuiControlTabPage page)
+        {
+            // Find the Hide Empty label and checkbox by name
+            var hideEmptyLabel = page.Controls.GetControlByName("LabelHideEmptyRight") as MyGuiControlLabel;
+            var hideEmptyCheckbox = page.Controls.GetControlByName("CheckboxHideEmptyRight") as MyGuiControlCheckbox;
+
+            if (hideEmptyLabel != null)
+            {
+                // Place Sort label to the left of Hide Empty label
+                var sortLabel = new MyGuiControlLabel
+                {
+                    Position = new Vector2(hideEmptyLabel.Position.X - 0.048f, hideEmptyLabel.Position.Y),
+                    Name = "SortBySpaceRightLabel",
+                    OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
+                    Text = "Sort"
+                };
+
+                // Place Sort checkbox to the left of Sort label
+                var sortCheckbox = new MyGuiControlCheckbox
+                {
+                    Position = new Vector2(sortLabel.Position.X - 0.048f, hideEmptyCheckbox?.Position.Y ?? hideEmptyLabel.Position.Y),
+                    Name = "SortBySpaceRight",
+                    OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
+                    IsChecked = Config.Current.SortByAvailableSpace
+                };
+                sortCheckbox.IsCheckedChanged += OnRightSortCheckboxChanged;
+
+                page.Controls.Add(sortLabel);
+                page.Controls.Add(sortCheckbox);
+            }
+        }
+    }
+
+    private static void OnLeftSortCheckboxChanged(MyGuiControlCheckbox checkbox)
+    {
+        Config.Current.SortByAvailableSpace = checkbox.IsChecked;
+        ConfigStorage.Save(Config.Current);
+        // Sync with right checkbox via the page
+        if (checkbox.Owner is MyGuiControlTabPage page)
+        {
+            var rightCheckbox = page.Controls.GetControlByName("SortBySpaceRight") as MyGuiControlCheckbox;
+            if (rightCheckbox != null && rightCheckbox.IsChecked != checkbox.IsChecked)
+                rightCheckbox.IsChecked = checkbox.IsChecked;
+        }
+    }
+
+    private static void OnRightSortCheckboxChanged(MyGuiControlCheckbox checkbox)
+    {
+        Config.Current.SortByAvailableSpace = checkbox.IsChecked;
+        ConfigStorage.Save(Config.Current);
+        // Sync with left checkbox via the page
+        if (checkbox.Owner is MyGuiControlTabPage page)
+        {
+            var leftCheckbox = page.Controls.GetControlByName("SortBySpaceLeft") as MyGuiControlCheckbox;
+            if (leftCheckbox != null && leftCheckbox.IsChecked != checkbox.IsChecked)
+                leftCheckbox.IsChecked = checkbox.IsChecked;
+        }
+    }
 
     /// <summary>
     /// Patches the CompareGuiControlInventoryOwners method to support sorting by available space.
