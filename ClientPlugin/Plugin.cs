@@ -36,6 +36,16 @@ public class Plugin : IPlugin
     private static PropertyInfo? s_inventoryMaxVolume;
     private static PropertyInfo? s_inventoryCurrentVolume;
 
+    // Cached field info for GetOwner lookups (avoid repeated AccessTools.Field calls)
+    private static FieldInfo? s_instanceField;
+    private static FieldInfo? s_controllerField;
+    private static FieldInfo? s_interactedOwnerField;
+    private static FieldInfo? s_userOwnerField;
+
+    // Cached owner values for current sort operation (set in Prefix, cleared in Postfix)
+    private static MyEntity? s_cachedInteractedOwner;
+    private static MyEntity? s_cachedUserOwner;
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     public void Init(object gameInstance)
     {
@@ -51,6 +61,18 @@ public class Plugin : IPlugin
         {
             s_inventoryMaxVolume = AccessTools.Property(myInventoryType, "MaxVolume");
             s_inventoryCurrentVolume = AccessTools.Property(myInventoryType, "CurrentVolume");
+        }
+
+        // Cache field info for GetOwner lookups
+        if (s_screenTerminalType != null)
+        {
+            s_instanceField = AccessTools.Field(s_screenTerminalType, "m_instance");
+            s_controllerField = AccessTools.Field(s_screenTerminalType, "m_controllerInventory");
+        }
+        if (s_terminalInventoryControllerType != null)
+        {
+            s_interactedOwnerField = AccessTools.Field(s_terminalInventoryControllerType, "m_interactedAsOwner");
+            s_userOwnerField = AccessTools.Field(s_terminalInventoryControllerType, "m_userAsOwner");
         }
 
         var harmony = new Harmony(Name);
@@ -133,28 +155,32 @@ public class Plugin : IPlugin
     /// </summary>
     private static void RefreshInventoryList()
     {
-        if (s_screenTerminalType == null) return;
-        
-        // Get the screen instance
-        var instanceField = AccessTools.Field(s_screenTerminalType, "m_instance");
-        var instance = instanceField?.GetValue(null) as MyGuiScreenTerminal;
+        if (s_instanceField == null || s_controllerField == null) return;
+
+        // Get the screen instance using cached FieldInfo
+        var instance = s_instanceField.GetValue(null) as MyGuiScreenTerminal;
         if (instance == null) return;
-        
-        // Get the controller
-        var controllerField = AccessTools.Field(s_screenTerminalType, "m_controllerInventory");
-        var controller = controllerField?.GetValue(instance);
+
+        // Get the controller using cached FieldInfo
+        var controller = s_controllerField.GetValue(instance);
         if (controller == null) return;
-        
+
+        // Cache owner values BEFORE the sort happens
+        CacheOwnerValues();
+
         // Call SetRightFilter via reflection to trigger list rebuild
         // This method is called when filter changes and it rebuilds the inventory list
         var setRightFilterMethod = AccessTools.Method(s_terminalInventoryControllerType, "SetRightFilter");
         var getRightFilterMethod = AccessTools.Property(s_terminalInventoryControllerType, "RightFilter");
-        
+
         if (setRightFilterMethod != null && getRightFilterMethod != null)
         {
             var currentFilter = getRightFilterMethod.GetValue(controller);
             setRightFilterMethod.Invoke(controller, new[] { currentFilter });
         }
+
+        // Clear cache after sorting completes
+        ClearOwnerCache();
     }
 
     /// <summary>
@@ -191,9 +217,9 @@ public class Plugin : IPlugin
                 return false;
             }
 
-            // Get interacted/user owners to prioritize them
-            var interactedOwner = GetOwner("m_interactedAsOwner");
-            var userOwner = GetOwner("m_userAsOwner");
+            // Use cached owner values (set once per sort operation)
+            var interactedOwner = s_cachedInteractedOwner;
+            var userOwner = s_cachedUserOwner;
 
             // Keep interacted/user owner at the top
             if (ownerX.InventoryOwner == interactedOwner || ownerX.InventoryOwner == userOwner)
@@ -224,21 +250,35 @@ public class Plugin : IPlugin
         }
     }
 
-    private static MyEntity? GetOwner(string fieldName)
+    /// <summary>
+    /// Caches owner values before sorting begins. Called via reflection from OnSortCheckboxChanged.
+    /// </summary>
+    private static void CacheOwnerValues()
     {
-        if (s_terminalInventoryControllerType == null) return null;
-        if (s_screenTerminalType == null) return null;
-        
-        var instanceField = AccessTools.Field(s_screenTerminalType, "m_instance");
-        var instance = instanceField?.GetValue(null) as MyGuiScreenTerminal;
-        if (instance == null) return null;
-        
-        var controllerField = AccessTools.Field(s_screenTerminalType, "m_controllerInventory");
-        var controller = controllerField?.GetValue(instance);
-        if (controller == null) return null;
-        
-        var ownerField = AccessTools.Field(s_terminalInventoryControllerType, fieldName);
-        return ownerField?.GetValue(controller) as MyEntity;
+        s_cachedInteractedOwner = null;
+        s_cachedUserOwner = null;
+
+        if (s_instanceField == null || s_controllerField == null ||
+            s_interactedOwnerField == null || s_userOwnerField == null)
+            return;
+
+        var instance = s_instanceField.GetValue(null) as MyGuiScreenTerminal;
+        if (instance == null) return;
+
+        var controller = s_controllerField.GetValue(instance);
+        if (controller == null) return;
+
+        s_cachedInteractedOwner = s_interactedOwnerField.GetValue(controller) as MyEntity;
+        s_cachedUserOwner = s_userOwnerField.GetValue(controller) as MyEntity;
+    }
+
+    /// <summary>
+    /// Clears cached owner values. Called after sorting completes.
+    /// </summary>
+    private static void ClearOwnerCache()
+    {
+        s_cachedInteractedOwner = null;
+        s_cachedUserOwner = null;
     }
 
     private static float GetTotalAvailableSpace(MyGuiControlInventoryOwner? owner)
