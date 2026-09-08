@@ -48,6 +48,8 @@ public class Plugin : IPlugin
     private static FieldInfo? s_interactedGridOwnersMechanicalField;
     private static PropertyInfo? s_rightFilterTypeIndexProperty;
     private static MethodInfo? s_createInventoryControlsInListMethod;
+    private static FieldInfo? s_searchBoxRightField;
+    private static MethodInfo? s_blockSearchRightTextChangedMethod;
 
     // Cached owner values for current sort operation
     private static MyEntity? s_cachedInteractedOwner;
@@ -97,6 +99,8 @@ public class Plugin : IPlugin
             s_interactedGridOwnersMechanicalField = AccessTools.Field(s_terminalInventoryControllerType, "m_interactedGridOwnersMechanical");
             s_rightFilterTypeIndexProperty = AccessTools.Property(s_terminalInventoryControllerType, "RightFilterTypeIndex");
             s_rightFilterProperty = AccessTools.Property(s_terminalInventoryControllerType, "RightFilter");
+            s_searchBoxRightField = AccessTools.Field(s_terminalInventoryControllerType, "m_searchBoxRight");
+            s_blockSearchRightTextChangedMethod = AccessTools.Method(s_terminalInventoryControllerType, "BlockSearchRight_TextChanged");
             s_createInventoryControlsInListMethod = AccessTools.Method(s_terminalInventoryControllerType, "CreateInventoryControlsInList", new[] { typeof(List<MyEntity>), typeof(MyGuiControlList), typeof(MyInventoryOwnerTypeEnum?) });
         }
 
@@ -162,8 +166,10 @@ public class Plugin : IPlugin
             //   Sort checkbox right edge at 0.325f, left edge 0.30f (gap 0.04f... tight but OK)
             //   Gap between Sort checkbox right edge and Hide Empty label left edge = 0.339 - 0.325 = 0.014f
 
-            // Shrink search box dramatically
-            searchBox.Size = new Vector2(0.20f, searchBox.Size.Y);
+            // Shrink search box (only if wider than target - don't enlarge it under
+            // localizations where the vanilla "Hide Empty" label already makes it narrow)
+            if (searchBox.Size.X > 0.20f)
+                searchBox.Size = new Vector2(0.20f, searchBox.Size.Y);
 
             // Sort label - RIGHT-aligned (right edge at 0.285f)
             var sortLabel = new MyGuiControlLabel
@@ -211,11 +217,19 @@ public class Plugin : IPlugin
 
     /// <summary>
     /// Triggers a refresh of the inventory list by directly calling CreateInventoryControlsInList.
+    /// After the rebuild it re-applies the search text + Hide Empty filter and restores the
+    /// focused inventory, mirroring what the game does after its own rebuilds
+    /// (searchBox.SearchText = searchBox.SearchText fires BlockSearchRight_TextChanged).
     /// </summary>
     private static void RefreshInventoryList()
     {
         try
         {
+            // On the character filter the right list shows a single inventory (not the grid list)
+            // and our checkbox is hidden - rebuilding here would corrupt the view.
+            if (IsRightFilterCharacter())
+                return;
+
             if (s_instanceField == null || s_controllerField == null) return;
             if (s_rightOwnersControlField == null || s_interactedGridOwnersField == null) return;
             if (s_rightFilterTypeIndexProperty == null || s_rightFilterTypeField == null) return;
@@ -238,13 +252,21 @@ public class Plugin : IPlugin
             // Same logic as the game: mechanical (index 2) filter uses the mechanical owners list
             var ownersToUse = (filterTypeIndex == 2 && ownersMechanical != null) ? ownersMechanical : owners;
 
-            // Cache owner values before rebuilding
-            CacheOwnerValues();
-
-            // Directly call CreateInventoryControlsInList
+            // Rebuild the list. The Harmony Prefix/Postfix on CreateInventoryControlsInList
+            // handle owner-cache setup/cleanup around the sort.
             s_createInventoryControlsInListMethod.Invoke(controller, new object[] { ownersToUse, rightOwnersControl, filterType });
 
-            ClearOwnerCache();
+            // The rebuild replaced every control (new controls default to Visible=true),
+            // which drops both the Hide Empty filter and any active search text, and leaves
+            // the focused inventory pointing at a destroyed control. Re-apply exactly like
+            // the game does: BlockSearchRight_TextChanged runs SearchInList (search + hide
+            // empty) and re-focuses the first visible inventory.
+            if (s_searchBoxRightField != null && s_blockSearchRightTextChangedMethod != null)
+            {
+                var searchBox = s_searchBoxRightField.GetValue(controller) as MyGuiControlSearchBox;
+                if (searchBox != null)
+                    s_blockSearchRightTextChangedMethod.Invoke(controller, new object[] { searchBox.SearchText });
+            }
         }
         catch
         {
