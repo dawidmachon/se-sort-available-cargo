@@ -1,50 +1,63 @@
 # se-inventory-sort
 
-Status: LOCAL-ONLY
+Status: PUBLISHED
 Category: public
 
-Client plugin that adds a sort button to the inventory UI, allowing users to sort inventory containers by available space (biggest/emptiest first).
-
-## Review Requirements
-
-**IMPORTANT:** For ANY code changes, perform MULTI-PASS review before declaring done:
-
-1. **Pass 1 - Architecture**: Read full code, trace data flow, null safety on reflection
-2. **Pass 2 - Performance**: Reflection caching, GC pressure, per-operation costs
-3. **Pass 3 - Edge Cases**: Lifecycle, event handlers, page reuse, race conditions
-4. **Pass 4 - Integration**: How patches interact with each other and game code
-
-Do NOT say "verification complete" after one pass. Found bugs in passes 1, 2, 3, and 4.
+Client plugin that adds a sort checkbox to the terminal inventory panel, allowing users to sort inventory containers by available space (most empty/largest first).
 
 ## Features
 
-- Adds a "Sort" checkbox to both left and right inventory panels in the terminal
-- By default, inventories are sorted by available space (most empty, largest first)
-- User preference persists between sessions
-- Can be toggled on/off via the checkbox or settings dialog
+- **Sort Checkbox**: Adds toggle to right inventory panel (next to "Hide Empty")
+- **Space-Based Sorting**: Sorts by available capacity (most empty first)
+- **Persistent Settings**: Preference saved between sessions
+- **Clean Integration**: Only visible on grid inventories (not character)
+- **Right Panel Only**: Left panel (production) keeps alphabetical order by default
 
 ## Key Files
 
-- `ClientPlugin/Plugin.cs` - Main plugin entry point with Harmony patches
-- `ClientPlugin/Config.cs` - Configuration settings
+- `ClientPlugin/Plugin.cs` - Main plugin with Harmony patches
+- `ClientPlugin/Config.cs` - Configuration with property change notification
 - `ClientPlugin/Settings/` - Settings dialog infrastructure
+- `README.md` - User documentation
+- `PLUGINHUB.md` - PluginHub listing description
 
 ## Harmony Patches
 
-- `MyGuiScreenTerminal.CreateInventoryPageLeftSection` - Adds sort checkbox to left panel
-- `MyGuiScreenTerminal.CreateInventoryPageRightSection` - Adds sort checkbox to right panel
-- `MyTerminalInventoryController.CompareGuiControlInventoryOwners` - Custom sort logic
+| Method | Purpose |
+|--------|---------|
+| `CreateInventoryPageRightSection` | Adds Sort checkbox UI |
+| `CreateInventoryControlsInList` | Sets owner cache before sorting |
+| `CompareGuiControlInventoryOwners` | Custom sort by available space |
+| `RightTypeGroup_SelectedChanged` | Updates checkbox visibility |
+
+## Performance Considerations
+
+- **Reflection caching**: All type/method/field lookups cached at Init
+- **Owner cache**: Set once per list build, not per comparison
+- **Sort threshold**: ~0.0001f float comparison tolerance to avoid jitter
+- **O(N log N)**: Standard sort complexity, ~300 comparisons for 50 items
+
+## Config Options
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| SortByAvailableSpace | true | Enable space-based sorting |
+| SortLeftPanelToo | false | Also sort left (production) panel |
+
+Config file: `%AppData%\Roaming\SpaceEngineers\Storage\InventorySort.cfg`
 
 ## Game Code References
 
-- `Sandbox.Game.GUI.MyGuiScreenTerminal` - Terminal screen with inventory tab
-- `Sandbox.Game.GUI.MyTerminalInventoryController` - Inventory controller with sorting logic
-- `Sandbox.Game.Screens.Helpers.MyGuiControlInventoryOwner` - Individual inventory container control
+- `Sandbox.Game.Gui.MyGuiScreenTerminal.CreateInventoryPageRightSection` - UI creation
+- `Sandbox.Game.Gui.MyTerminalInventoryController.CreateInventoryControlsInList` - List building
+- `Sandbox.Game.Gui.MyTerminalInventoryController.CompareGuiControlInventoryOwners` - Sort comparison
+- `Sandbox.Game.Entities.MyEntity.GetInventoryBase(int)` - Inventory access
+- `Sandbox.Game.MyInventory.MaxVolume/CurrentVolume` - Volume properties
 
 ## Building
 
 ```bash
-dotnet build InventorySort.sln
+dotnet build ClientPlugin/ClientPlugin.csproj -c Release
 ```
 
 DLL auto-deploys to Pulsar Local directories when game is closed.

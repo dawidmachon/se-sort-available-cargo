@@ -1,41 +1,75 @@
-# Inventory Sort
+# Inventory Sort Plugin
 
-A Space Engineers client plugin that enhances the inventory UI by adding a sort feature.
+Adds a "Sort" checkbox to the terminal inventory panel, allowing users to sort inventory containers by available space (most empty/largest first).
 
 ## Features
 
-- **Sort by Available Space**: When enabled, inventory containers are sorted by their remaining capacity (most empty/largest first)
-- **Toggle On/Off**: Use the "Sort" checkbox in the inventory UI to enable/disable sorting
-- **Persistent Settings**: Your preference is saved between sessions
-- **Enabled by Default**: Sorting is ON by default
+- **Sort Checkbox**: Adds a "Sort" toggle to the right inventory panel (next to "Hide Empty")
+- **Space-Based Sorting**: Sorts containers by available space (most empty first), making it easy to find storage with room
+- **Persistent Settings**: Remembers your sort preference between sessions
+- **Clean Integration**: Follows existing game UI patterns - only visible when viewing grid inventories (not character inventory)
+- **No Performance Impact**: Reflection-based access is cached; sorting only happens when panel is rebuilt
 
 ## How It Works
 
-When you open the inventory of a ship or station, you'll see a "Sort" checkbox near the top-right corner of each inventory panel. When enabled:
+When enabled, inventories are sorted by available capacity:
+- **Most available space first** (emptiest containers)
+- **Interacted/user inventory stays at top** for easy access
+- **Original alphabetical order preserved** as tiebreaker
 
-1. The inventory list is sorted so that containers with the most available space appear first
-2. This helps you quickly find where to store items
-3. The interacted-with entity (like the ship you're currently accessing) stays at the top
+The sorting applies only to the **right inventory panel** (cargo/storage blocks). The left panel (production blocks like assemblers/refineries) keeps the game's original alphabetical order.
+
+### Left Panel Sorting
+
+By default, the left panel (production blocks) is not sorted. You can enable sorting for the left panel via the settings dialog or by editing the config file at:
+```
+%AppData%\Roaming\SpaceEngineers\Storage\InventorySort.cfg
+```
+
+Set `SortLeftPanelToo = True` in the config file.
+
+## UI Placement
+
+The Sort checkbox appears in the right inventory panel's toolbar:
+```
+[Search Box] [Sort □] [Hide Empty □]
+```
+
+Visibility follows Hide Empty behavior - only shown when viewing grid inventories, hidden when viewing character inventory.
 
 ## Requirements
 
-- [Space Engineers](https://store.steampowered.com/app/244850/Space_Engineers/)
-- [Pulsar](https://github.com/SpaceGT/Pulsar)
-
-## Installation
-
-This is a Pulsar client plugin. Place the compiled DLL in your Pulsar plugins folder or let Pulsar compile from source.
+- Space Engineers with [Pulsar](https://pulsarplugin.dev/) installed
+- Both Legacy (.NET Framework 4.8) and Interim (.NET 10.0) editions supported
 
 ## Building
 
 ```bash
-dotnet build InventorySort.sln
+dotnet build ClientPlugin/ClientPlugin.csproj -c Release
 ```
+
+DLL auto-deploys to Pulsar Local directories on Windows when game is closed.
 
 ## Configuration
 
-Access the plugin settings through the Pulsar settings menu to toggle the sort feature.
+Config file: `%AppData%\Roaming\SpaceEngineers\Storage\InventorySort.cfg`
 
-## License
+```xml
+<?xml version="1.0"?>
+<Config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <SortByAvailableSpace>true</SortByAvailableSpace>
+  <SortLeftPanelToo>false</SortLeftPanelToo>
+</Config>
+```
 
-MIT
+| Setting | Default | Description |
+|---------|---------|-------------|
+| SortByAvailableSpace | true | Enable/disable space-based sorting |
+| SortLeftPanelToo | false | Also sort left panel (production blocks) |
+
+## Technical Notes
+
+- Uses Harmony for runtime patching
+- Caches reflection data on init for performance
+- Only affects sorting comparison - no other inventory behavior modified
+- Safe for multiplayer: client-side only, no server impact

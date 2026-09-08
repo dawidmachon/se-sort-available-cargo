@@ -13,6 +13,11 @@ public class Config : INotifyPropertyChanged
     // Default ON - sort inventories by available space (biggest/emptiest first)
     private bool sortByAvailableSpace = true;
 
+    // Default OFF - also sort the left inventory panel (production blocks)
+    // Most users only want right panel sorted (cargo storage), since production
+    // blocks (assemblers, refineries) usually have items in process.
+    private bool sortLeftPanelToo = false;
+
     #endregion
 
     #region User interface
@@ -24,6 +29,13 @@ public class Config : INotifyPropertyChanged
     {
         get => sortByAvailableSpace;
         set => SetField(ref sortByAvailableSpace, value);
+    }
+
+    [Checkbox(description: "Also sort the LEFT inventory panel (production blocks). Default: OFF - left panel keeps original alphabetical order, since production blocks usually have items.")]
+    public bool SortLeftPanelToo
+    {
+        get => sortLeftPanelToo;
+        set => SetField(ref sortLeftPanelToo, value);
     }
 
     #endregion

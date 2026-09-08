@@ -369,3 +369,6 @@ MigrationBackup/
 
 # Plugin specific
 *.il
+
+# Local pi coding agent settings
+/.pi/
