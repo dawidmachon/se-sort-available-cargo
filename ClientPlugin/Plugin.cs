@@ -36,6 +36,8 @@ public class Plugin : IPlugin
     private static PropertyInfo? s_inventoryMaxVolume;
     private static PropertyInfo? s_inventoryCurrentVolume;
     private static MethodInfo? s_getInventoryMethod;
+    private static MethodInfo? s_setRightFilterMethod;
+    private static PropertyInfo? s_rightFilterProperty;
 
     // Cached field info for GetOwner lookups (avoid repeated AccessTools.Field calls)
     private static FieldInfo? s_instanceField;
@@ -63,6 +65,13 @@ public class Plugin : IPlugin
             s_inventoryMaxVolume = AccessTools.Property(myInventoryType, "MaxVolume");
             s_inventoryCurrentVolume = AccessTools.Property(myInventoryType, "CurrentVolume");
             s_getInventoryMethod = AccessTools.Method(myInventoryType, "GetInventory");
+        }
+
+        // Cache filter-related methods
+        if (s_terminalInventoryControllerType != null)
+        {
+            s_setRightFilterMethod = AccessTools.Method(s_terminalInventoryControllerType, "SetRightFilter");
+            s_rightFilterProperty = AccessTools.Property(s_terminalInventoryControllerType, "RightFilter");
         }
 
         // Cache field info for GetOwner lookups
@@ -161,6 +170,7 @@ public class Plugin : IPlugin
     private static void RefreshInventoryList()
     {
         if (s_instanceField == null || s_controllerField == null) return;
+        if (s_setRightFilterMethod == null || s_rightFilterProperty == null) return;
 
         // Get the screen instance using cached FieldInfo
         var instance = s_instanceField.GetValue(null) as MyGuiScreenTerminal;
@@ -170,16 +180,10 @@ public class Plugin : IPlugin
         var controller = s_controllerField.GetValue(instance);
         if (controller == null) return;
 
-        // Call SetRightFilter via reflection to trigger list rebuild
+        // Call SetRightFilter via cached reflection to trigger list rebuild
         // CreateInventoryControlsInList_Patch will handle cache setup/cleanup
-        var setRightFilterMethod = AccessTools.Method(s_terminalInventoryControllerType, "SetRightFilter");
-        var getRightFilterMethod = AccessTools.Property(s_terminalInventoryControllerType, "RightFilter");
-
-        if (setRightFilterMethod != null && getRightFilterMethod != null)
-        {
-            var currentFilter = getRightFilterMethod.GetValue(controller);
-            setRightFilterMethod.Invoke(controller, new[] { currentFilter });
-        }
+        var currentFilter = s_rightFilterProperty.GetValue(controller);
+        s_setRightFilterMethod.Invoke(controller, new[] { currentFilter });
     }
 
     /// <summary>
