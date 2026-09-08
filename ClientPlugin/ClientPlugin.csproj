@@ -2,7 +2,7 @@
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <RootNamespace>ClientPlugin</RootNamespace>
-    <AssemblyName>InventorySort</AssemblyName>
+    <AssemblyName>SortAvailableCargo</AssemblyName>
     <LangVersion>14</LangVersion>
     <Nullable>annotations</Nullable>
       

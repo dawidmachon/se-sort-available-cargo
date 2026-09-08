@@ -22,7 +22,7 @@ public class Config : INotifyPropertyChanged
 
     #region User interface
 
-    public readonly string Title = "Inventory Sort";
+    public readonly string Title = "Sort by Available Cargo";
 
     [Checkbox(description: "Sort inventory containers by available space (most empty first). Default: ON")]
     public bool SortByAvailableSpace

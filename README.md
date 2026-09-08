@@ -1,75 +1,70 @@
-# Inventory Sort Plugin
+# Sort by Available Cargo
 
-Adds a "Sort" checkbox to the terminal inventory panel, allowing users to sort inventory containers by available space (most empty/largest first).
+A Space Engineers client plugin (Pulsar) that adds inventory sorting to the terminal UI. Sort containers by remaining free cargo space so the most-empty inventories appear first — find where to drop off scrap in seconds.
+
+![Screenshot of the Sort checkbox next to Hide Empty](docs/screenshot.png)
 
 ## Features
 
-- **Sort Checkbox**: Adds a "Sort" toggle to the right inventory panel (next to "Hide Empty")
-- **Space-Based Sorting**: Sorts containers by available space (most empty first), making it easy to find storage with room
-- **Persistent Settings**: Remembers your sort preference between sessions
-- **Clean Integration**: Follows existing game UI patterns - only visible when viewing grid inventories (not character inventory)
-- **No Performance Impact**: Reflection-based access is cached; sorting only happens when panel is rebuilt
+- **Sort by Available Cargo**: Containers are sorted by `MaxVolume - CurrentVolume`, so the most-empty inventories rise to the top.
+- **In-UI toggle**: A Sort checkbox sits right next to the existing "Hide Empty" checkbox on the right inventory panel — no need to open a settings dialog.
+- **Smart visibility**: The Sort checkbox hides itself when the character/suit filter is active (mirrors how "Hide Empty" behaves — only one inventory means nothing to sort).
+- **Right-panel only by default**: Production blocks (left panel) keep the original alphabetical order. Optional toggle in plugin settings if you want both panels sorted.
+- **Tooltip on hover**: Hover the Sort checkbox to read a one-liner explaining what it does.
+- **Persists across sessions**: Your on/off state survives game restarts.
+- **Enabled by default**: Sorting is ON out of the box — works the first time you open the terminal.
+
+## Installation
+
+1. Install [Pulsar](https://github.com/SpaceGT/Pulsar).
+2. Enable this plugin (`Sort by Available Cargo`) in the Pulsar profile editor (`Profiles\Current.xml` for both `Legacy` and `Interim` editions).
+3. DLL + descriptor XML are auto-deployed by the project's `Deploy.bat` when built with `dotnet build` (Pulsar must be closed for the copy to succeed).
+
+## Usage
+
+1. Open any terminal (ship/station inventory).
+2. Switch to the grid filter (the cube icon, not the character icon).
+3. Tick the **Sort** checkbox next to **Hide Empty** on the right panel.
+4. The inventory list reorders so emptier containers come first.
+
+State is remembered per-user and restored next session.
+
+## Settings (plugin settings dialog)
+
+| Option | Default | Effect |
+|---|---|---|
+| `SortByAvailableSpace` | ON | Master switch for inventory sorting. |
+| `SortLeftPanelToo` | OFF | Also sort the left (production) panel. Off by default because production blocks usually have items in progress. |
 
 ## How It Works
 
-When enabled, inventories are sorted by available capacity:
-- **Most available space first** (emptiest containers)
-- **Interacted/user inventory stays at top** for easy access
-- **Original alphabetical order preserved** as tiebreaker
+Harmony patches three methods on `MyTerminalInventoryController`:
 
-The sorting applies only to the **right inventory panel** (cargo/storage blocks). The left panel (production blocks like assemblers/refineries) keeps the game's original alphabetical order.
+1. `CreateInventoryPageRightSection` — adds a Sort checkbox + label to the right tab page. Shrinks the search box so the Sort controls fit between it and "Hide Empty".
+2. `CreateInventoryControlsInList` — caches the currently-focused owner before the sort runs and identifies which panel is being sorted. Cleared afterwards.
+3. `CompareGuiControlInventoryOwners` — replaces the comparison function with one that ranks by available space when the Sort toggle is on and the panel being sorted is allowed by config.
 
-### Left Panel Sorting
-
-By default, the left panel (production blocks) is not sorted. You can enable sorting for the left panel via the settings dialog or by editing the config file at:
-```
-%AppData%\Roaming\SpaceEngineers\Storage\InventorySort.cfg
-```
-
-Set `SortLeftPanelToo = True` in the config file.
-
-## UI Placement
-
-The Sort checkbox appears in the right inventory panel's toolbar:
-```
-[Search Box] [Sort □] [Hide Empty □]
-```
-
-Visibility follows Hide Empty behavior - only shown when viewing grid inventories, hidden when viewing character inventory.
-
-## Requirements
-
-- Space Engineers with [Pulsar](https://pulsarplugin.dev/) installed
-- Both Legacy (.NET Framework 4.8) and Interim (.NET 10.0) editions supported
+Available space is computed via reflection on `MyInventory.MaxVolume` / `MyInventory.CurrentVolume`. `MyFixedPoint` (the volume unit) is converted through its `RawValue` long field divided by 1,000,000.
 
 ## Building
 
 ```bash
-dotnet build ClientPlugin/ClientPlugin.csproj -c Release
+dotnet build SortAvailableCargo.sln
 ```
 
-DLL auto-deploys to Pulsar Local directories on Windows when game is closed.
+DLL + descriptor XML are auto-deployed to `%AppData%\Pulsar\Legacy\Local` and `%AppData%\Pulsar\Interim\Local` by the project's MSBuild targets (game must be closed).
 
-## Configuration
+## Compatibility
 
-Config file: `%AppData%\Roaming\SpaceEngineers\Storage\InventorySort.cfg`
+- Space Engineers 1.210.x
+- Pulsar (Legacy net48 + Interim net10.0)
+- Should be neutral to other inventory plugins (`BetterInventorySearch`, `Assembler Sorting`, etc.) — the Sort checkbox is just another control on the same page.
 
-```xml
-<?xml version="1.0"?>
-<Config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <SortByAvailableSpace>true</SortByAvailableSpace>
-  <SortLeftPanelToo>false</SortLeftPanelToo>
-</Config>
-```
+## Known Limitations
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| SortByAvailableSpace | true | Enable/disable space-based sorting |
-| SortLeftPanelToo | false | Also sort left panel (production blocks) |
+- The Sort checkbox lives on the right inventory page only. The left (production) panel can be sorted via the `SortLeftPanelToo` config flag, but there is no checkbox on the left side.
+- Multi-inventory containers (refineries, assemblers, survival kits) sum the available space across all their inventories.
 
-## Technical Notes
+## License
 
-- Uses Harmony for runtime patching
-- Caches reflection data on init for performance
-- Only affects sorting comparison - no other inventory behavior modified
-- Safe for multiplayer: client-side only, no server impact
+MIT

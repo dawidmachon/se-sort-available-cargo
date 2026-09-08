@@ -1,14 +1,14 @@
-# se-inventory-sort
+# se-sort-available-cargo
 
 Status: PUBLISHED
 Category: public
 
-Client plugin that adds a sort checkbox to the terminal inventory panel, allowing users to sort inventory containers by available space (most empty/largest first).
+Client plugin that adds a sort checkbox to the terminal inventory panel, allowing users to sort inventory containers by available cargo space (most empty/largest first).
 
 ## Features
 
 - **Sort Checkbox**: Adds toggle to right inventory panel (next to "Hide Empty")
-- **Space-Based Sorting**: Sorts by available capacity (most empty first)
+- **Cargo-Space Sorting**: Sorts by available capacity (most empty first)
 - **Persistent Settings**: Preference saved between sessions
 - **Clean Integration**: Only visible on grid inventories (not character)
 - **Right Panel Only**: Left panel (production) keeps alphabetical order by default
@@ -19,7 +19,7 @@ Client plugin that adds a sort checkbox to the terminal inventory panel, allowin
 - `ClientPlugin/Config.cs` - Configuration with property change notification
 - `ClientPlugin/Settings/` - Settings dialog infrastructure
 - `README.md` - User documentation
-- `PLUGINHUB.md` - PluginHub listing description
+- `SortAvailableCargo.xml` - Pulsar plugin descriptor
 
 ## Harmony Patches
 
@@ -27,13 +27,14 @@ Client plugin that adds a sort checkbox to the terminal inventory panel, allowin
 |--------|---------|
 | `CreateInventoryPageRightSection` | Adds Sort checkbox UI |
 | `CreateInventoryControlsInList` | Sets owner cache before sorting |
-| `CompareGuiControlInventoryOwners` | Custom sort by available space |
+| `CompareGuiControlInventoryOwners` | Custom sort by available cargo space |
 | `RightTypeGroup_SelectedChanged` | Updates checkbox visibility |
 
 ## Performance Considerations
 
 - **Reflection caching**: All type/method/field lookups cached at Init
 - **Owner cache**: Set once per list build, not per comparison
+- **Space cache**: Dictionary keyed by MyEntity, cleared between sorts — each owner's space is computed at most once per sort
 - **Sort threshold**: ~0.0001f float comparison tolerance to avoid jitter
 - **O(N log N)**: Standard sort complexity, ~300 comparisons for 50 items
 
@@ -44,20 +45,20 @@ Client plugin that adds a sort checkbox to the terminal inventory panel, allowin
 | SortByAvailableSpace | true | Enable space-based sorting |
 | SortLeftPanelToo | false | Also sort left (production) panel |
 
-Config file: `%AppData%\Roaming\SpaceEngineers\Storage\InventorySort.cfg`
+Config file: `%AppData%\Roaming\SpaceEngineers\Storage\SortAvailableCargo.cfg`
 
 ## Game Code References
 
 - `Sandbox.Game.Gui.MyGuiScreenTerminal.CreateInventoryPageRightSection` - UI creation
 - `Sandbox.Game.Gui.MyTerminalInventoryController.CreateInventoryControlsInList` - List building
 - `Sandbox.Game.Gui.MyTerminalInventoryController.CompareGuiControlInventoryOwners` - Sort comparison
-- `Sandbox.Game.Entities.MyEntity.GetInventoryBase(int)` - Inventory access
+- `VRage.Game.Entity.MyEntity.GetInventoryBase(int)` - Inventory access
 - `Sandbox.Game.MyInventory.MaxVolume/CurrentVolume` - Volume properties
 
 ## Building
 
 ```bash
-dotnet build ClientPlugin/ClientPlugin.csproj -c Release
+dotnet build SortAvailableCargo.sln
 ```
 
 DLL auto-deploys to Pulsar Local directories when game is closed.
