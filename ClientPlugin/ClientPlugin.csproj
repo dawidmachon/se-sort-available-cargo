@@ -13,9 +13,11 @@
     <!-- Ensure SDK generates assembly attributes (no need for AssemblyInfo) -->
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
 
-    <!-- Default versions; override in Directory.Build.props  -->
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <!-- Default versions, used only when Version.Build.props (imported first via
+         Directory.Build.props) did not set them. Unconditional values here would
+         overwrite the import - MSBuild evaluates the csproj body AFTER imports. -->
+    <AssemblyVersion Condition=" '$(AssemblyVersion)' == '' ">1.0.0.0</AssemblyVersion>
+    <FileVersion Condition=" '$(FileVersion)' == '' ">1.0.0.0</FileVersion>
     <PathSeparator Condition="$([MSBuild]::IsOSPlatform('Windows'))">\</PathSeparator>
     <PathSeparator Condition="!$([MSBuild]::IsOSPlatform('Windows'))">/</PathSeparator>
 
