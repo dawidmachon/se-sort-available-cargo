@@ -53,7 +53,6 @@
     <OutputPath>bin/Debug/</OutputPath>
     <DefineConstants>DEBUG;TRACE;DEV_BUILD</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
-    <NoWarn>$(NoWarn);CS8632</NoWarn>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
 
@@ -264,7 +263,6 @@
 
   <ItemGroup>
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
-    <PackageReference Include="Mono.Cecil" Version="0.11.6" />
     <!-- Uncomment to enable publicizer support  
     <PackageReference Include="Krafs.Publicizer" Version="2.3.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
