@@ -30,6 +30,16 @@ Client plugin that adds a sort checkbox to the terminal inventory panel, allowin
 | `CompareGuiControlInventoryOwners` | Custom sort by available cargo space |
 | `RightTypeGroup_SelectedChanged` | Updates checkbox visibility |
 
+## Plugin Interop (v1.1.0)
+
+- List rebuilds go through the controller's **public `Refresh()`** (never the private
+  `CreateInventoryControlsInList`), so plugins that prefix `Refresh()` to own the
+  inventory panel (Unified Storage) intercept our rebuilds like the game's own.
+- The Sort checkbox hides itself when any other plugin has a Harmony prefix on
+  `Refresh()` — conservative, but guarantees no dead control in any plugin combo.
+- Sort label/checkbox positions are measured from the actual localized label sizes
+  (anchored to the Hide Empty label's left edge); the search box shrinks to fit.
+
 ## Performance Considerations
 
 - **Reflection caching**: All type/method/field lookups cached at Init

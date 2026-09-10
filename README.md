@@ -41,9 +41,11 @@ State is remembered per-user and restored next session.
 
 Harmony patches three methods on `MyTerminalInventoryController`:
 
-1. `CreateInventoryPageRightSection` — adds a Sort checkbox + label to the right tab page. Shrinks the search box so the Sort controls fit between it and "Hide Empty".
+1. `CreateInventoryPageRightSection` — adds a Sort checkbox + label to the right tab page. Positions are measured from the actual (localized) label sizes, and the search box shrinks so the Sort controls always fit between it and "Hide Empty".
 2. `CreateInventoryControlsInList` — caches the currently-focused owner before the sort runs and identifies which panel is being sorted. Cleared afterwards.
 3. `CompareGuiControlInventoryOwners` — replaces the comparison function with one that ranks by available space when the Sort toggle is on and the panel being sorted is allowed by config.
+
+Toggling Sort triggers the controller's public `Refresh()` — the game's own rebuild path — so the list, search filter, Hide Empty filter and focus are restored exactly like the game does, and plugins that take over the inventory panel stay in charge.
 
 Available space is computed via reflection on `MyInventory.MaxVolume` / `MyInventory.CurrentVolume`. `MyFixedPoint` (the volume unit) is converted through its `RawValue` long field divided by 1,000,000.
 
@@ -59,6 +61,7 @@ DLL + descriptor XML are auto-deployed to `%AppData%\Pulsar\Legacy\Local` and `%
 
 - Space Engineers 1.210.x
 - Pulsar (Legacy net48 + Interim net10.0)
+- **Unified Storage** (OwendB1/se-unified-storage): compatible — rebuilds go through the game's own `Refresh()` entry point, so Unified Storage keeps full control of the panel. While such a plugin is enabled, the Sort checkbox hides itself (it would have no effect on the unified view).
 - Should be neutral to other inventory plugins (`BetterInventorySearch`, `Assembler Sorting`, etc.) — the Sort checkbox is just another control on the same page.
 
 ## Known Limitations
