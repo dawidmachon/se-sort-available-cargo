@@ -13,9 +13,11 @@
     <!-- Ensure SDK generates assembly attributes (no need for AssemblyInfo) -->
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
 
-    <!-- Default versions; override in Directory.Build.props  -->
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <!-- Default versions, used only when Version.Build.props (imported first via
+         Directory.Build.props) did not set them. Unconditional values here would
+         overwrite the import - MSBuild evaluates the csproj body AFTER imports. -->
+    <AssemblyVersion Condition=" '$(AssemblyVersion)' == '' ">1.0.0.0</AssemblyVersion>
+    <FileVersion Condition=" '$(FileVersion)' == '' ">1.0.0.0</FileVersion>
     <PathSeparator Condition="$([MSBuild]::IsOSPlatform('Windows'))">\</PathSeparator>
     <PathSeparator Condition="!$([MSBuild]::IsOSPlatform('Windows'))">/</PathSeparator>
 
@@ -53,7 +55,6 @@
     <OutputPath>bin/Debug/</OutputPath>
     <DefineConstants>DEBUG;TRACE;DEV_BUILD</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
-    <NoWarn>$(NoWarn);CS8632</NoWarn>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
 
@@ -264,7 +265,6 @@
 
   <ItemGroup>
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
-    <PackageReference Include="Mono.Cecil" Version="0.11.6" />
     <!-- Uncomment to enable publicizer support  
     <PackageReference Include="Krafs.Publicizer" Version="2.3.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

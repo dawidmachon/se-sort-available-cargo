@@ -1,3 +1,8 @@
+// The registry build (Pulsar RoslynCompiler) compiles with the nullable context OFF,
+// which would turn every 'Type?' style annotation here into a CS8632 warning.
+// Enabling just the annotations context silences them without changing analysis.
+#nullable enable annotations
+
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using ClientPlugin.Settings;
@@ -16,8 +21,8 @@ using VRage.Game.Entity;
 
 // Define assembly version when compiled by Pulsar
 #if !DEV_BUILD
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 #endif
 
 namespace ClientPlugin;
@@ -42,14 +47,8 @@ public class Plugin : IPlugin
     private static FieldInfo? s_controllerField;
     private static FieldInfo? s_interactedOwnerField;
     private static FieldInfo? s_userOwnerField;
-    private static FieldInfo? s_rightFilterTypeField;
-    private static FieldInfo? s_rightOwnersControlField;
-    private static FieldInfo? s_interactedGridOwnersField;
-    private static FieldInfo? s_interactedGridOwnersMechanicalField;
-    private static PropertyInfo? s_rightFilterTypeIndexProperty;
-    private static MethodInfo? s_createInventoryControlsInListMethod;
-    private static FieldInfo? s_searchBoxRightField;
-    private static MethodInfo? s_blockSearchRightTextChangedMethod;
+    private static FieldInfo? s_rightOwnersControlField; // Right owners list - identifies which panel is being rebuilt
+    private static MethodInfo? s_refreshMethod;          // Public Refresh() - the game's own list rebuild entry point
 
     // Cached owner values for current sort operation
     private static MyEntity? s_cachedInteractedOwner;
@@ -93,17 +92,9 @@ public class Plugin : IPlugin
         {
             s_interactedOwnerField = AccessTools.Field(s_terminalInventoryControllerType, "m_interactedAsOwner");
             s_userOwnerField = AccessTools.Field(s_terminalInventoryControllerType, "m_userAsOwner");
-            s_rightFilterTypeField = AccessTools.Field(s_terminalInventoryControllerType, "m_rightFilterType");
             s_rightOwnersControlField = AccessTools.Field(s_terminalInventoryControllerType, "m_rightOwnersControl");
-            s_interactedGridOwnersField = AccessTools.Field(s_terminalInventoryControllerType, "m_interactedGridOwners");
-            s_interactedGridOwnersMechanicalField = AccessTools.Field(s_terminalInventoryControllerType, "m_interactedGridOwnersMechanical");
-            s_rightFilterTypeIndexProperty = AccessTools.Property(s_terminalInventoryControllerType, "RightFilterTypeIndex");
             s_rightFilterProperty = AccessTools.Property(s_terminalInventoryControllerType, "RightFilter");
-            s_searchBoxRightField = AccessTools.Field(s_terminalInventoryControllerType, "m_searchBoxRight");
-            s_blockSearchRightTextChangedMethod = AccessTools.Method(s_terminalInventoryControllerType, "BlockSearchRight_TextChanged");
-#pragma warning disable CS0618 // MyInventoryOwnerTypeEnum is obsolete but required by the game's CreateInventoryControlsInList signature
-            s_createInventoryControlsInListMethod = AccessTools.Method(s_terminalInventoryControllerType, "CreateInventoryControlsInList", new[] { typeof(List<MyEntity>), typeof(MyGuiControlList), typeof(MyInventoryOwnerTypeEnum?) });
-#pragma warning restore CS0618
+            s_refreshMethod = AccessTools.Method(s_terminalInventoryControllerType, "Refresh");
         }
 
         var harmony = new Harmony(Name);
@@ -131,8 +122,9 @@ public class Plugin : IPlugin
 
     /// <summary>
     /// Patches CreateInventoryPageRightSection to add our Sort checkbox next to Hide Empty.
-    /// Layout: [Search box] [Sort label Sort □] [Hide Empty label Hide Empty □]
-    /// Sort fits in the existing gap between search box end and Hide Empty label.
+    /// Layout: [Search box (shrunk)] [Sort label][Sort □] ... [Hide Empty label Hide Empty □]
+    /// All positions are measured from the actual (localized) control sizes so longer
+    /// labels push the group apart instead of overlapping.
     /// </summary>
     [HarmonyPatch(typeof(MyGuiScreenTerminal), "CreateInventoryPageRightSection")]
     public static class CreateInventoryPageRightSection_Patch
@@ -154,51 +146,63 @@ public class Plugin : IPlugin
             // Use exact Y from Hide Empty checkbox (game uses -0.255f)
             float yPos = hideEmptyCheckbox.Position.Y;
 
-            // ===== Layout (explicit positions, no relative math) =====
-            // Game creates these with num=0.004f offset for right section:
-            //   Search box:        X = 0.0225f, LEFT-aligned, width = 0.361f - labelSize.X
-            //   Hide Empty label:  X = 0.419f, RIGHT-aligned, width ~0.08f, starts at 0.339f
-            //   Hide Empty checkbox: X = 0.467f, RIGHT-aligned, width ~0.025f, starts at 0.442f
+            // ===== Layout (measured, localization-safe) =====
+            // Vanilla row (game's num=0.004f offset for the right section):
+            //   Search box:          X = 0.0225f, LEFT-aligned, width = 0.361f - hideEmptyLabelSize.X
+            //   Hide Empty label:    X = 0.419f, RIGHT-aligned, auto-sized to its text
+            //   Hide Empty checkbox: X = 0.467f, RIGHT-aligned
+            // Our row: [Search box (shrunk)] [Sort label][Sort checkbox] ... [Hide Empty group]
             //
-            // We need:
-            //   [Search box (shrunk)] [Sort label Sort □] [Hide Empty label Hide Empty □]
-            //
-            //   Make search box MUCH shorter (0.20f width). It will end at 0.0225+0.20 = 0.2225f.
-            //   Sort label right edge at 0.285f, left edge 0.245f (gap 0.0225f from search)
-            //   Sort checkbox right edge at 0.325f, left edge 0.30f (gap 0.04f... tight but OK)
-            //   Gap between Sort checkbox right edge and Hide Empty label left edge = 0.339 - 0.325 = 0.014f
+            // Labels auto-size to their (possibly localized) text, so anchor our group to
+            // the LEFT EDGE of the Hide Empty label instead of a fixed X: with English text
+            // this lands at the same place as the old fixed 0.325f checkbox edge, and longer
+            // localizations slide the group left instead of overlapping. The search box is
+            // then shrunk to fit our label - the same trick vanilla uses against Hide Empty.
 
-            // Shrink search box (only if wider than target - don't enlarge it under
-            // localizations where the vanilla "Hide Empty" label already makes it narrow)
-            if (searchBox.Size.X > 0.20f)
-                searchBox.Size = new Vector2(0.20f, searchBox.Size.Y);
+            // Right-aligned label: left edge = anchor X - rendered width
+            float hideEmptyLabelLeft = hideEmptyLabel.PositionX - hideEmptyLabel.Size.X;
 
-            // Sort label - RIGHT-aligned (right edge at 0.285f)
-            var sortLabel = new MyGuiControlLabel
-            {
-                Position = new Vector2(0.285f, yPos),
-                Name = "SortBySpaceRightLabel",
-                OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
-                Text = "Sort"
-            };
+            const float maxCheckboxRightEdge = 0.325f; // vanilla-English position
+            const float checkboxHideEmptyGap = 0.012f;
+            float checkboxRightEdge = Math.Min(maxCheckboxRightEdge, hideEmptyLabelLeft - checkboxHideEmptyGap);
 
-            // Sort checkbox - RIGHT-aligned (right edge at 0.325f)
+            // Sort checkbox - RIGHT-aligned (right edge at checkboxRightEdge)
             var sortCheckbox = new MyGuiControlCheckbox
             {
-                Position = new Vector2(0.325f, yPos),
+                Position = new Vector2(checkboxRightEdge, yPos),
                 Name = "SortBySpaceRight",
                 OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
                 IsChecked = Config.Current.SortByAvailableSpace
             };
 
+            // Sort label - RIGHT-aligned, just left of the checkbox. Text is set in the
+            // initializer so the label's auto-sized Size.X is valid for measurement below.
+            const float labelCheckboxGap = 0.006f;
+            var sortLabel = new MyGuiControlLabel
+            {
+                Position = new Vector2(checkboxRightEdge - sortCheckbox.Size.X - labelCheckboxGap, yPos),
+                Name = "SortBySpaceRightLabel",
+                OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER,
+                Text = "Sort"
+            };
+
+            // Shrink the search box so our label can never overlap it (only shrink - never
+            // enlarge - and keep a minimum usable width; with an extremely long localization
+            // a slight overlap is preferable to an unusable search box).
+            const float minSearchBoxWidth = 0.10f;
+            const float searchLabelGap = 0.008f;
+            float maxSearchBoxWidth = sortLabel.Position.X - sortLabel.Size.X - searchLabelGap - searchBox.PositionX;
+            if (searchBox.Size.X > maxSearchBoxWidth)
+                searchBox.Size = new Vector2(Math.Max(minSearchBoxWidth, maxSearchBoxWidth), searchBox.Size.Y);
+
             // Tooltip on hover
             sortCheckbox.SetToolTip("Sort inventories by available space (most empty first)");
 
-            // Visibility based on filter (like Hide Empty)
-            // Visible on all filters EXCEPT FilterCharacter (where there's only 1 inventory)
-            bool isCharacterFilter = IsRightFilterCharacter();
-            sortCheckbox.Visible = !isCharacterFilter;
-            sortLabel.Visible = !isCharacterFilter;
+            // Visibility: like Hide Empty, hidden on the character filter (single inventory),
+            // and hidden when another plugin owns the right column (dead control there).
+            bool visible = !IsRightFilterCharacter() && !ThirdPartyOwnsRightColumn();
+            sortCheckbox.Visible = visible;
+            sortLabel.Visible = visible;
 
             // Store in static fields for later access
             s_sortCheckbox = sortCheckbox;
@@ -218,10 +222,15 @@ public class Plugin : IPlugin
     }
 
     /// <summary>
-    /// Triggers a refresh of the inventory list by directly calling CreateInventoryControlsInList.
-    /// After the rebuild it re-applies the search text + Hide Empty filter and restores the
-    /// focused inventory, mirroring what the game does after its own rebuilds
-    /// (searchBox.SearchText = searchBox.SearchText fires BlockSearchRight_TextChanged).
+    /// Triggers a refresh of the inventory list through the controller's public Refresh()
+    /// entry point - the game's own rebuild path. Refresh() rebuilds both columns, re-applies
+    /// the search text + Hide Empty filter and restores focus/selection exactly like the game
+    /// does after its own rebuilds.
+    ///
+    /// Going through Refresh() (instead of calling the private CreateInventoryControlsInList
+    /// directly) keeps the plugin composable: plugins that prefix Refresh() to own the
+    /// inventory UI (e.g. Unified Storage) intercept this call the same way they intercept
+    /// the game's own refreshes, so the shared UI can never get out of sync.
     /// </summary>
     private static void RefreshInventoryList()
     {
@@ -233,9 +242,7 @@ public class Plugin : IPlugin
                 return;
 
             if (s_instanceField == null || s_controllerField == null) return;
-            if (s_rightOwnersControlField == null || s_interactedGridOwnersField == null) return;
-            if (s_rightFilterTypeIndexProperty == null || s_rightFilterTypeField == null) return;
-            if (s_createInventoryControlsInListMethod == null) return;
+            if (s_refreshMethod == null) return;
 
             var instance = s_instanceField.GetValue(null) as MyGuiScreenTerminal;
             if (instance == null) return;
@@ -243,34 +250,7 @@ public class Plugin : IPlugin
             var controller = s_controllerField.GetValue(instance);
             if (controller == null) return;
 
-            var owners = s_interactedGridOwnersField.GetValue(controller) as List<MyEntity>;
-            var ownersMechanical = s_interactedGridOwnersMechanicalField?.GetValue(controller) as List<MyEntity>;
-            var rightOwnersControl = s_rightOwnersControlField.GetValue(controller) as MyGuiControlList;
-#pragma warning disable CS0618 // MyInventoryOwnerTypeEnum is obsolete but required by the game's CreateInventoryControlsInList signature
-            var filterType = s_rightFilterTypeField.GetValue(controller) as MyInventoryOwnerTypeEnum?;
-#pragma warning restore CS0618
-            var filterTypeIndex = (int?)s_rightFilterTypeIndexProperty.GetValue(controller);
-
-            if (owners == null || rightOwnersControl == null) return;
-
-            // Same logic as the game: mechanical (index 2) filter uses the mechanical owners list
-            var ownersToUse = (filterTypeIndex == 2 && ownersMechanical != null) ? ownersMechanical : owners;
-
-            // Rebuild the list. The Harmony Prefix/Postfix on CreateInventoryControlsInList
-            // handle owner-cache setup/cleanup around the sort.
-            s_createInventoryControlsInListMethod.Invoke(controller, new object[] { ownersToUse, rightOwnersControl, filterType });
-
-            // The rebuild replaced every control (new controls default to Visible=true),
-            // which drops both the Hide Empty filter and any active search text, and leaves
-            // the focused inventory pointing at a destroyed control. Re-apply exactly like
-            // the game does: BlockSearchRight_TextChanged runs SearchInList (search + hide
-            // empty) and re-focuses the first visible inventory.
-            if (s_searchBoxRightField != null && s_blockSearchRightTextChangedMethod != null)
-            {
-                var searchBox = s_searchBoxRightField.GetValue(controller) as MyGuiControlSearchBox;
-                if (searchBox != null)
-                    s_blockSearchRightTextChangedMethod.Invoke(controller, new object[] { searchBox.SearchText });
-            }
+            s_refreshMethod.Invoke(controller, null);
         }
         catch
         {
@@ -356,9 +336,9 @@ public class Plugin : IPlugin
         [HarmonyPostfix]
         public static void Postfix()
         {
-            // Update Sort visibility - hide only on FilterCharacter
-            bool isCharacterFilter = IsRightFilterCharacter();
-            bool visible = !isCharacterFilter;
+            // Update Sort visibility - hide on the character filter and when another
+            // plugin owns the right column (its Refresh prefix suppresses our sort)
+            bool visible = !IsRightFilterCharacter() && !ThirdPartyOwnsRightColumn();
 
             if (s_sortCheckbox != null) s_sortCheckbox.Visible = visible;
             if (s_sortLabel != null) s_sortLabel.Visible = visible;
@@ -424,13 +404,15 @@ public class Plugin : IPlugin
                 }
             }
 
-            // Sort by available space (most empty first)
+            // Sort by available space (most empty first).
+            // Direct comparison keeps the comparator transitive; an epsilon "equal" band
+            // would be intransitive and can make List.Sort throw on inconsistent results.
             float spaceX = GetTotalAvailableSpace(ownerX);
             float spaceY = GetTotalAvailableSpace(ownerY);
-
-            if (Math.Abs(spaceX - spaceY) > 0.0001f)
+            int bySpace = spaceY.CompareTo(spaceX); // descending: most available space first
+            if (bySpace != 0)
             {
-                __result = spaceX > spaceY ? -1 : 1;
+                __result = bySpace;
                 return false;
             }
 
@@ -505,6 +487,40 @@ public class Plugin : IPlugin
     }
 
     /// <summary>
+    /// True when a plugin other than ours adds a Harmony prefix to the controller's
+    /// public Refresh() - the method through which the right inventory column is rebuilt.
+    /// Such a plugin (e.g. Unified Storage) can suppress vanilla Refresh() and own the
+    /// right column, which would leave our Sort checkbox without any effect, so it is
+    /// hidden instead. The check is conservative: when in doubt, hide.
+    /// </summary>
+    private static bool ThirdPartyOwnsRightColumn()
+    {
+        try
+        {
+            if (s_terminalInventoryControllerType == null)
+                return false;
+
+            var refreshMethod = AccessTools.Method(s_terminalInventoryControllerType, "Refresh");
+            var patches = Harmony.GetPatchInfo(refreshMethod);
+            if (patches == null)
+                return false;
+
+            foreach (var prefix in patches.Prefixes)
+            {
+                if (!string.Equals(prefix.owner, Name, StringComparison.Ordinal))
+                    return true;
+            }
+
+            return false;
+        }
+        catch
+        {
+            // When in doubt, assume another plugin owns the column (hide the checkbox)
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Gets total available space (MaxVolume - CurrentVolume) for all inventories.
     /// Uses GetInventoryBase (public method on MyEntity).
     /// Uses RawValue field of MyFixedPoint for proper float conversion.
@@ -528,7 +544,7 @@ public class Plugin : IPlugin
         {
             var inv = s_getInventoryBaseMethod.Invoke(owner.InventoryOwner, new object[] { i });
             if (inv == null)
-                break;
+                continue;
 
             // Use late binding to get properties from actual instance type
             var invType = inv.GetType();

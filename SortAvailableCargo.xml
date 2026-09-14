@@ -59,7 +59,8 @@ Features:
     -->
 
     <!-- The current plugin version's commit hash -->
-    <Commit>2597e4fd8066f93c4d8e449dabce67fbb01b3077</Commit>
+    <!-- In-repo backup copy: the registry manifest in the PluginHub PR carries the real hash -->
+    <Commit>TODO</Commit>
 
     <!-- Optional list of alternate versions of the plugin, use it for test or custom builds
     <AlternateVersions>
